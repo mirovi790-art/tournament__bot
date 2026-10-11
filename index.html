@@ -1,0 +1,341 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+<title>Турнир · Mini App</title>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<style>
+* { box-sizing: border-box; }
+html, body { margin:0; padding:0; font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif; background:#0b1220; color:#f1f5f9; min-height:100vh; user-select:none; overflow-x:hidden; }
+#app { display:flex; flex-direction:column; min-height:100vh; }
+#topbar { display:flex; justify-content:space-between; align-items:center; padding:12px 16px; background:linear-gradient(135deg,#1e293b,#0f172a); border-bottom:1px solid #334155; position:sticky; top:0; z-index:10; }
+#title { font-weight:700; font-size:16px; }
+.status { font-size:12px; padding:4px 10px; border-radius:999px; background:#334155; color:#cbd5e1; }
+.status.ok { background:#065f46; color:#d1fae5; }
+.status.err { background:#7f1d1d; color:#fee2e2; }
+.view { flex:1; display:flex; flex-direction:column; }
+.hidden { display:none !important; }
+.table-wrap { padding:12px; display:flex; justify-content:center; align-items:center; flex:1; }
+.table-felt { position:relative; width:100%; max-width:480px; aspect-ratio:3/4; border-radius:50%/40%; background:radial-gradient(ellipse at center,#14532d 0%,#052e16 80%); border:8px solid #78350f; box-shadow:inset 0 0 60px rgba(0,0,0,0.6),0 10px 30px rgba(0,0,0,0.5); display:flex; align-items:center; justify-content:center; }
+.pot { position:absolute; top:8%; left:50%; transform:translateX(-50%); background:rgba(0,0,0,0.55); padding:6px 14px; border-radius:999px; font-weight:700; color:#fbbf24; font-size:14px; }
+.community { display:flex; gap:6px; justify-content:center; align-items:center; position:absolute; top:50%; left:50%; transform:translate(-50%,-50%); }
+.card { width:42px; height:60px; background:#fff; color:#111; border-radius:6px; display:flex; flex-direction:column; justify-content:space-between; align-items:center; padding:3px 4px; font-weight:700; font-size:14px; box-shadow:0 3px 6px rgba(0,0,0,0.5); animation:dealCard .35s ease-out; }
+.card.red { color:#dc2626; }
+.card.back { background:repeating-linear-gradient(45deg,#1e3a8a,#1e3a8a 6px,#1d4ed8 6px,#1d4ed8 12px); color:transparent; }
+@keyframes dealCard { from { transform:translateY(-40px) rotate(-15deg); opacity:0; } to { transform:translateY(0) rotate(0); opacity:1; } }
+#players-ring { position:absolute; inset:0; }
+.player { position:absolute; width:84px; transform:translate(-50%,-50%); background:rgba(15,23,42,0.9); border:2px solid #334155; border-radius:12px; padding:6px 4px 4px; text-align:center; font-size:11px; transition:all .25s; }
+.player.turn { border-color:#facc15; box-shadow:0 0 14px #facc15; }
+.player.folded { opacity:.35; filter:grayscale(1); }
+.player .name { font-weight:700; font-size:11px; color:#e2e8f0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.player .chips { color:#fbbf24; font-weight:700; font-size:11px; }
+.player .bet { color:#22d3ee; font-size:10px; }
+.player .cards { display:flex; gap:2px; justify-content:center; margin-top:2px; }
+.player .cards .mini { width:16px; height:22px; border-radius:3px; background:#fff; color:#111; font-size:9px; display:flex; align-items:center; justify-content:center; font-weight:700; }
+.player .cards .mini.red { color:#dc2626; }
+.player .cards .mini.back { background:#1e40af; color:transparent; }
+.log-box { margin:6px 10px; padding:8px 12px; background:#0f172a; border:1px solid #1e293b; border-radius:10px; font-size:11px; color:#94a3b8; max-height:88px; overflow-y:auto; white-space:pre-line; }
+.actions { display:grid; grid-template-columns:repeat(3,1fr); gap:8px; padding:10px; }
+.btn { border:none; border-radius:12px; padding:12px 10px; color:#fff; font-weight:700; font-size:13px; cursor:pointer; transition:transform .1s,opacity .15s; background:#334155; }
+.btn:active { transform:scale(0.97); }
+.btn:disabled { opacity:.4; }
+.btn-fold { background:#7f1d1d; }
+.btn-check { background:#1e40af; }
+.btn-call { background:#065f46; }
+.btn-raise { background:#b45309; }
+.btn-allin { background:#6d28d9; }
+.btn-spin { background:linear-gradient(135deg,#db2777,#f59e0b); font-size:16px; padding:14px 24px; border-radius:999px; }
+.raise-row { display:flex; align-items:center; gap:12px; padding:0 14px 12px; }
+.raise-row input { flex:1; }
+#raise-amount { font-weight:700; color:#fbbf24; min-width:60px; text-align:right; }
+.timer-bar { height:6px; background:#1e293b; overflow:hidden; }
+#timer-fill { height:100%; width:0%; background:linear-gradient(90deg,#22c55e,#eab308,#ef4444); transition:width .3s linear; }
+.wheel-wrap { position:relative; display:flex; justify-content:center; align-items:center; padding:16px; }
+#wheel { width:90vw; max-width:420px; height:auto; filter:drop-shadow(0 0 30px rgba(219,39,119,0.4)); }
+.pointer { position:absolute; top:8px; left:50%; transform:translateX(-50%); font-size:32px; color:#fbbf24; text-shadow:0 2px 6px rgba(0,0,0,0.7); z-index:2; }
+.wheel-info { display:flex; flex-direction:column; align-items:center; gap:14px; padding:0 16px; }
+.prize { font-size:16px; font-weight:700; color:#fbbf24; padding:10px 18px; background:rgba(251,191,36,0.1); border-radius:12px; border:1px solid rgba(251,191,36,0.4); text-align:center; }
+.eliminated-box, .active-box { margin:12px 16px; padding:12px 16px; background:#0f172a; border:1px solid #1e293b; border-radius:12px; }
+.eliminated-box h3, .active-box h3 { margin:0 0 8px; font-size:13px; color:#cbd5e1; }
+.eliminated-box ul, .active-box ul { margin:0; padding-left:18px; font-size:13px; color:#e2e8f0; }
+.eliminated-box li { color:#fca5a5; }
+.active-box li { color:#86efac; }
+.modal { position:fixed; inset:0; background:rgba(0,0,0,0.75); display:flex; align-items:center; justify-content:center; z-index:100; }
+.modal-card { background:linear-gradient(135deg,#1e293b,#0f172a); border:1px solid #334155; border-radius:20px; padding:26px 22px; max-width:340px; width:90%; text-align:center; animation:pop .3s ease-out; }
+@keyframes pop { from { transform:scale(0.7); opacity:0; } to { transform:scale(1); opacity:1; } }
+#modal-title { font-size:22px; font-weight:800; margin-bottom:12px; color:#fbbf24; }
+#modal-body { font-size:15px; color:#e2e8f0; margin-bottom:18px; line-height:1.5; }
+.confetti { position:fixed; inset:0; pointer-events:none; z-index:99; }
+@media (max-width:380px) { .card { width:36px; height:52px; font-size:12px; } .player { width:72px; font-size:10px; } }
+</style>
+</head>
+<body>
+<div id="app">
+  <header id="topbar"><div id="title">🏆 Турнир</div><div id="status" class="status">Подключение…</div></header>
+  <main id="poker-view" class="view hidden">
+    <div class="table-wrap"><div class="table-felt">
+      <div id="pot" class="pot">Банк: 0</div>
+      <div id="community" class="community"></div>
+      <div id="players-ring"></div>
+    </div></div>
+    <div class="log-box" id="log-box"></div>
+    <div class="actions" id="poker-actions">
+      <button class="btn btn-fold" data-act="fold">Фолд</button>
+      <button class="btn btn-check" data-act="check">Чек</button>
+      <button class="btn btn-call" data-act="call">Колл</button>
+      <button class="btn btn-raise" data-act="raise">Рейз</button>
+      <button class="btn btn-allin" data-act="allin">Олл-ин</button>
+    </div>
+    <div class="raise-row hidden" id="raise-row">
+      <input type="range" id="raise-slider" min="0" max="1000" value="0" step="10" />
+      <span id="raise-amount">0</span>
+    </div>
+    <div class="timer-bar"><div id="timer-fill"></div></div>
+  </main>
+  <main id="wheel-view" class="view hidden">
+    <div class="wheel-wrap"><canvas id="wheel" width="640" height="640"></canvas><div class="pointer">▼</div></div>
+    <div class="wheel-info"><div id="wheel-prize" class="prize">🏆 Приз</div><button id="spin-btn" class="btn btn-spin">🎡 КРУТИТЬ</button></div>
+    <div class="eliminated-box"><h3>❌ Выбывшие</h3><ul id="eliminated-list"></ul></div>
+    <div class="active-box"><h3>🟢 На колесе</h3><ul id="active-list"></ul></div>
+  </main>
+  <div id="modal" class="modal hidden"><div class="modal-card">
+    <div id="modal-title">Победитель!</div><div id="modal-body"></div>
+    <button id="modal-close" class="btn">Закрыть</button>
+  </div></div>
+  <canvas id="confetti" class="confetti hidden"></canvas>
+</div>
+<script>
+const tg = window.Telegram?.WebApp;
+tg?.ready(); tg?.expand?.();
+const params = new URLSearchParams(location.search);
+const TID = parseInt(params.get("tid") || "0", 10);
+const INIT_DATA = tg?.initData || "";
+const els = {
+  title: document.getElementById("title"), status: document.getElementById("status"),
+  pokerView: document.getElementById("poker-view"), wheelView: document.getElementById("wheel-view"),
+  pot: document.getElementById("pot"), community: document.getElementById("community"),
+  ring: document.getElementById("players-ring"), logBox: document.getElementById("log-box"),
+  actions: document.getElementById("poker-actions"), raiseRow: document.getElementById("raise-row"),
+  raiseSlider: document.getElementById("raise-slider"), raiseAmount: document.getElementById("raise-amount"),
+  timerFill: document.getElementById("timer-fill"), wheel: document.getElementById("wheel"),
+  spinBtn: document.getElementById("spin-btn"), elimList: document.getElementById("eliminated-list"),
+  actList: document.getElementById("active-list"), prize: document.getElementById("wheel-prize"),
+  modal: document.getElementById("modal"), modalTitle: document.getElementById("modal-title"),
+  modalBody: document.getElementById("modal-body"), modalClose: document.getElementById("modal-close"),
+  confetti: document.getElementById("confetti"),
+};
+let WS = null, MY_ID = null, GAME_TYPE = null, LAST_POKER = null, LAST_WHEEL = null;
+let WHEEL_ANGLE = 0, WHEEL_SPINNING = false;
+
+(async function boot() {
+  if (!TID || !INIT_DATA) { setStatus("Нет данных Mini App", "err"); return; }
+  try {
+    const r = await fetch(`/api/tournament/${TID}?initData=${encodeURIComponent(INIT_DATA)}`);
+    if (!r.ok) throw new Error(await r.text());
+    const info = await r.json();
+    GAME_TYPE = info.game_type; MY_ID = info.user_id;
+    els.title.textContent = `🏆 ${info.name}`;
+    if (GAME_TYPE === "poker") els.pokerView.classList.remove("hidden");
+    else els.wheelView.classList.remove("hidden");
+    connectWS();
+  } catch (e) { setStatus("Ошибка: " + e.message, "err"); }
+})();
+
+function setStatus(t, cls) { els.status.textContent = t; els.status.className = "status " + (cls || ""); }
+
+function connectWS() {
+  const proto = location.protocol === "https:" ? "wss" : "ws";
+  const url = `${proto}://${location.host}/ws/${TID}?initData=${encodeURIComponent(INIT_DATA)}`;
+  WS = new WebSocket(url);
+  WS.onopen = () => setStatus("🟢 Онлайн", "ok");
+  WS.onclose = () => { setStatus("🔴 Оффлайн", "err"); setTimeout(connectWS, 2000); };
+  WS.onerror = () => setStatus("⚠ Ошибка", "err");
+  WS.onmessage = (ev) => {
+    const msg = JSON.parse(ev.data);
+    if (msg.type === "poker_state") renderPoker(msg);
+    else if (msg.type === "wheel_state") renderWheel(msg);
+    else if (msg.type === "tournament_cancelled") showModal("🛑 Турнир отменён", "Администратор остановил турнир.");
+  };
+}
+
+function wsSend(obj) { if (WS && WS.readyState === 1) WS.send(JSON.stringify(obj)); }
+
+function renderPoker(s) {
+  LAST_POKER = s;
+  els.pot.textContent = `💰 Банк: ${s.pot}`;
+  els.community.innerHTML = "";
+  s.community.forEach(c => els.community.appendChild(makeCard(c)));
+  const total = s.players.length, cx = 50, cy = 50, rx = 40, ry = 42;
+  els.ring.innerHTML = "";
+  s.players.forEach((p, i) => {
+    const angle = (i / total) * Math.PI * 2 - Math.PI / 2;
+    const x = cx + rx * Math.cos(angle), y = cy + ry * Math.sin(angle);
+    const div = document.createElement("div");
+    div.className = "player" + (p.is_turn ? " turn" : "") + (p.folded ? " folded" : "");
+    div.style.left = x + "%"; div.style.top = y + "%";
+    const cardsHTML = (p.cards || []).map(c => {
+      if (c === "?") return `<div class="mini back">?</div>`;
+      const red = c.includes("♥") || c.includes("♦");
+      return `<div class="mini ${red ? "red" : ""}">${c}</div>`;
+    }).join("");
+    div.innerHTML = `<div class="name">${escapeHtml(p.name)}</div><div class="chips">💰 ${p.chips}</div>${p.bet ? `<div class="bet">Ставка: ${p.bet}</div>` : ""}<div class="cards">${cardsHTML}</div>`;
+    els.ring.appendChild(div);
+  });
+  els.logBox.textContent = (s.log || []).join("\n");
+  const me = s.players.find(p => p.user_id === MY_ID);
+  const myTurn = me && s.turn_idx >= 0 && s.players[s.turn_idx] && s.players[s.turn_idx].user_id === MY_ID && !me.folded && !me.all_in;
+  [...els.actions.querySelectorAll("button")].forEach(b => { b.disabled = !myTurn; });
+  const toCall = me ? Math.max(0, s.current_bet - me.bet) : 0;
+  const checkBtn = els.actions.querySelector('[data-act="check"]');
+  const callBtn = els.actions.querySelector('[data-act="call"]');
+  checkBtn.classList.toggle("hidden", toCall > 0);
+  callBtn.classList.toggle("hidden", toCall === 0);
+  if (toCall > 0) callBtn.textContent = `Колл ${Math.min(toCall, me.chips)}`;
+  else callBtn.textContent = "Колл";
+  if (myTurn && me) {
+    const minRaise = s.min_raise || s.big_blind;
+    const maxRaise = me.chips;
+    els.raiseSlider.min = minRaise;
+    els.raiseSlider.max = Math.max(minRaise, maxRaise);
+    els.raiseSlider.value = minRaise;
+    els.raiseAmount.textContent = minRaise;
+    els.raiseRow.classList.remove("hidden");
+  } else els.raiseRow.classList.add("hidden");
+  if (s.turn_deadline && myTurn) {
+    const total = s.turn_time || 20;
+    const remaining = Math.max(0, s.turn_deadline - Date.now() / 1000);
+    els.timerFill.style.width = Math.min(100, (remaining / total) * 100) + "%";
+  } else els.timerFill.style.width = "0%";
+  if (s.finished && s.winner_info) {
+    showModal("🏆 ТУРНИР ЗАВЕРШЁН!", `Победитель: <b>${escapeHtml(s.winner_info.name)}</b><br>Награда: ${s.winner_info.amount}`);
+    fireConfetti();
+  }
+}
+
+function makeCard(c) {
+  const div = document.createElement("div");
+  const red = c.includes("♥") || c.includes("♦");
+  div.className = "card" + (red ? " red" : "");
+  if (c === "?") div.classList.add("back");
+  div.textContent = c;
+  return div;
+}
+
+function renderWheel(s) {
+  LAST_WHEEL = s;
+  els.prize.textContent = "🏆 " + (s.prize || "Приз");
+  els.elimList.innerHTML = (s.eliminated || []).slice().sort((a, b) => b.place - a.place).map(p => `<li>${escapeHtml(p.name)} — место ${p.place}</li>`).join("");
+  els.actList.innerHTML = (s.active || []).map(p => `<li>${escapeHtml(p.name)}</li>`).join("");
+  const spinDisabled = s.finished || s.active.length < 2;
+  els.spinBtn.disabled = spinDisabled;
+  drawWheel(s.active);
+  if (s.last_spin && s.last_spin._shownFor !== s.spin_count) {
+    s.last_spin._shownFor = s.spin_count;
+    animateSpinToEliminated(s);
+  }
+  if (s.finished && s.winner) {
+    setTimeout(() => {
+      showModal("🏆 ПОБЕДИТЕЛЬ!", `<b>${escapeHtml(s.winner.name)}</b><br>${escapeHtml(s.prize || "")}`);
+      fireConfetti();
+    }, 1200);
+  }
+}
+
+function drawWheel(active) {
+  const canvas = els.wheel;
+  const ctx = canvas.getContext("2d");
+  const W = canvas.width, H = canvas.height;
+  const cx = W / 2, cy = H / 2, r = Math.min(W, H) / 2 - 20;
+  ctx.clearRect(0, 0, W, H);
+  const n = Math.max(active.length, 1);
+  const palette = ["#ef4444","#f59e0b","#10b981","#3b82f6","#8b5cf6","#ec4899","#14b8a6","#f43f5e","#84cc16","#06b6d4"];
+  for (let i = 0; i < n; i++) {
+    const a0 = (i / n) * Math.PI * 2 - Math.PI / 2 + WHEEL_ANGLE;
+    const a1 = ((i + 1) / n) * Math.PI * 2 - Math.PI / 2 + WHEEL_ANGLE;
+    ctx.beginPath(); ctx.moveTo(cx, cy); ctx.arc(cx, cy, r, a0, a1); ctx.closePath();
+    ctx.fillStyle = palette[i % palette.length]; ctx.fill();
+    ctx.strokeStyle = "#0f172a"; ctx.lineWidth = 2; ctx.stroke();
+    const mid = (a0 + a1) / 2;
+    ctx.save(); ctx.translate(cx, cy); ctx.rotate(mid); ctx.textAlign = "right";
+    ctx.fillStyle = "#fff"; ctx.font = "bold 16px sans-serif";
+    const label = active[i] ? active[i].name : "";
+    ctx.fillText(label.length > 12 ? label.slice(0, 12) + "…" : label, r - 12, 6);
+    ctx.restore();
+  }
+  ctx.beginPath(); ctx.arc(cx, cy, 42, 0, Math.PI * 2);
+  ctx.fillStyle = "#0f172a"; ctx.fill();
+  ctx.strokeStyle = "#fbbf24"; ctx.lineWidth = 4; ctx.stroke();
+  ctx.fillStyle = "#fbbf24"; ctx.font = "bold 22px sans-serif";
+  ctx.textAlign = "center"; ctx.textBaseline = "middle";
+  ctx.fillText("🎡", cx, cy);
+}
+
+function animateSpinToEliminated(s) {
+  if (WHEEL_SPINNING) return;
+  WHEEL_SPINNING = true;
+  const activeBefore = s.active.concat([s.last_spin.eliminated]);
+  const n = activeBefore.length, idx = s.last_spin.sector_index;
+  const turns = 6 + Math.random() * 2;
+  const baseAngle = WHEEL_ANGLE;
+  const target = baseAngle + turns * Math.PI * 2 + (((- (idx + 0.5) / n * Math.PI * 2) - baseAngle) % (Math.PI * 2));
+  const duration = 4200;
+  const start = performance.now(), startA = WHEEL_ANGLE;
+  const oldActive = s.active.slice();
+  function frame(t) {
+    const k = Math.min(1, (t - start) / duration);
+    const eased = 1 - Math.pow(1 - k, 3);
+    WHEEL_ANGLE = startA + (target - startA) * eased;
+    drawWheel(activeBefore);
+    if (k < 1) requestAnimationFrame(frame);
+    else {
+      WHEEL_ANGLE = target; drawWheel(oldActive); WHEEL_SPINNING = false;
+      showModal("❌ Выбывает", `<b>${escapeHtml(s.last_spin.eliminated.name)}</b><br>покидает турнир!`);
+    }
+  }
+  requestAnimationFrame(frame);
+}
+
+els.actions.addEventListener("click", (e) => {
+  const btn = e.target.closest("button");
+  if (!btn || btn.disabled) return;
+  const act = btn.dataset.act;
+  let amount = 0;
+  if (act === "raise") amount = parseInt(els.raiseSlider.value, 10) || 0;
+  wsSend({ type: "poker_action", action: act, amount });
+});
+els.raiseSlider?.addEventListener("input", () => { els.raiseAmount.textContent = els.raiseSlider.value; });
+els.spinBtn.addEventListener("click", () => { if (WHEEL_SPINNING) return; wsSend({ type: "spin" }); });
+els.modalClose.addEventListener("click", () => { els.modal.classList.add("hidden"); els.confetti.classList.add("hidden"); });
+
+function showModal(title, body) { els.modalTitle.textContent = title; els.modalBody.innerHTML = body; els.modal.classList.remove("hidden"); }
+function escapeHtml(s) { return String(s || "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])); }
+
+function fireConfetti() {
+  const canvas = els.confetti;
+  canvas.classList.remove("hidden");
+  canvas.width = window.innerWidth; canvas.height = window.innerHeight;
+  const ctx = canvas.getContext("2d");
+  const pieces = Array.from({ length: 160 }, () => ({
+    x: Math.random() * canvas.width, y: -20 - Math.random() * 200,
+    vy: 2 + Math.random() * 3, vx: -1 + Math.random() * 2,
+    r: 4 + Math.random() * 5, color: `hsl(${Math.random()*360},90%,60%)`,
+    rot: Math.random() * Math.PI, vr: -0.1 + Math.random() * 0.2,
+  }));
+  let frames = 0;
+  function loop() {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    pieces.forEach(p => {
+      p.x += p.vx; p.y += p.vy; p.rot += p.vr;
+      ctx.save(); ctx.translate(p.x, p.y); ctx.rotate(p.rot);
+      ctx.fillStyle = p.color; ctx.fillRect(-p.r, -p.r, p.r * 2, p.r * 0.6); ctx.restore();
+    });
+    frames++;
+    if (frames < 400) requestAnimationFrame(loop);
+    else canvas.classList.add("hidden");
+  }
+  loop();
+}
+</script>
+</body>
+</html>
