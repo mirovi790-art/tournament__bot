@@ -22,6 +22,14 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 def _esc(s): return html.escape(s or "")
 
 
+def _display_name(u, uid):
+    """Возвращает человекочитаемое имя. Приоритет: first_name → @username → Игрок #id."""
+    if u:
+        if u.first_name: return u.first_name
+        if u.username: return "@" + u.username
+    return f"Игрок {uid}"
+
+
 def validate_init_data(init_data):
     if not init_data or not BOT_TOKEN: return None
     try:
@@ -48,8 +56,7 @@ async def _waiting_state(tid, t, user_id):
         players_info = []
         for p in parts:
             u = await s.get(User, p.user_id)
-            players_info.append({"user_id": p.user_id,
-                                 "name": (u.first_name if u and u.first_name else str(p.user_id))})
+            players_info.append({"user_id": p.user_id, "name": _display_name(u, p.user_id)})
     if t.game_type == "poker":
         return {"type": "poker_state", "tid": tid, "table_id": 0, "table_count": 1,
                 "phase": "waiting", "pot": 0, "community": [], "current_bet": 0,
@@ -64,7 +71,8 @@ async def _waiting_state(tid, t, user_id):
                             for p in players_info]}
     return {"type": "wheel_state", "tid": tid, "active": players_info,
             "eliminated": [], "spin_count": 0, "finished": False,
-            "winner": None, "prize": t.prize or "🏆 Приз", "last_spin": None}
+            "winner": None, "prize": t.prize or "🏆 Приз", "last_spin": None,
+            "server_now": int(time.time() * 1000)}
 
 
 def create_app(bot):
@@ -110,11 +118,9 @@ def create_app(bot):
                 my_tours.append({"tid": t.id, "name": t.name, "status": t.status,
                                  "game_type": t.game_type, "my_status": p.status,
                                  "prize": t.prize or ""})
-        return {"user_id": user_id,
-                "username": u_obj.get("username"),
+        return {"user_id": user_id, "username": u_obj.get("username"),
                 "first_name": u_obj.get("first_name"),
-                "wins": wins, "is_admin": is_admin,
-                "tournaments": my_tours}
+                "wins": wins, "is_admin": is_admin, "tournaments": my_tours}
 
     @app.get("/api/tournament/{tid}")
     async def api_tournament(tid: int, initData: str):
@@ -141,8 +147,7 @@ def create_app(bot):
                 "access_type": t.access_type, "status": t.status,
                 "prize": t.prize, "user_id": user_id,
                 "min_players": t.min_players,
-                "is_admin": is_admin,
-                "is_participant": is_participant}
+                "is_admin": is_admin, "is_participant": is_participant}
 
     @app.websocket("/ws/{tid}")
     async def ws_endpoint(websocket: WebSocket, tid: int):
@@ -157,6 +162,13 @@ def create_app(bot):
                 s.add(User(id=user_id,
                            username=parsed.get("user_obj", {}).get("username"),
                            first_name=parsed.get("user_obj", {}).get("first_name")))
+                await s.commit()
+            else:
+                # Обновляем данные на случай изменений в Telegram
+                new_fn = parsed.get("user_obj", {}).get("first_name")
+                new_un = parsed.get("user_obj", {}).get("username")
+                if new_fn and u.first_name != new_fn: u.first_name = new_fn
+                if new_un and u.username != new_un: u.username = new_un
                 await s.commit()
             t = await s.get(Tournament, tid)
             if not t: await websocket.close(code=4004); return
@@ -240,10 +252,8 @@ async def _admin_end(bot, tid):
     from main import _finalize_tournament, _finalized_tids
     gm._active_poker.pop(tid, None); gm._active_wheel.pop(tid, None)
     _finalized_tids.discard(tid)
-    try:
-        await _finalize_tournament(bot, tid, manual=True)
-    except Exception as e:
-        logging.exception("admin_end fail: %s", e)
+    try: await _finalize_tournament(bot, tid, manual=True)
+    except Exception as e: logging.exception("admin_end fail: %s", e)
 
 
 async def _admin_pause(tid, pause):
@@ -252,8 +262,7 @@ async def _admin_pause(tid, pause):
         if not tt: return
         tt.status = "paused" if pause else "running"
         await s.commit()
-    await gm.broadcast(tid, {"type": "tournament_paused" if pause else "tournament_resumed",
-                             "tid": tid})
+    await gm.broadcast(tid, {"type": "tournament_paused" if pause else "tournament_resumed", "tid": tid})
 
 
 async def _admin_kick(tid, t, target_uid):
@@ -261,8 +270,7 @@ async def _admin_kick(tid, t, target_uid):
         r = await s.execute(select(Participant).where(
             Participant.tournament_id == tid, Participant.user_id == target_uid))
         p = r.scalar_one_or_none()
-        if p:
-            p.status = "kicked"; await s.commit()
+        if p: p.status = "kicked"; await s.commit()
     if t.game_type == "poker":
         g = gm.get_poker(tid)
         if g:
