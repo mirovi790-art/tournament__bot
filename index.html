@@ -189,9 +189,9 @@ let MY_ID = null, IS_ADMIN = false, WS = null, ACTIVE_TID = null;
 let GAME_TYPE = null, LAST_STATE = null;
 let IS_CREATOR = false, IS_PARTICIPANT = false;
 let WHEEL_ANGLE = 0;
-let WHEEL_LOCK = false;        // true во время анимации и модалки
-let WHEEL_NEXT = null;         // отложенный state пока заблокировано
-let WHEEL_LAST_SPIN_SHOWN = 0; // какой spin_count мы уже проиграли
+let WHEEL_LOCK = false;
+let WHEEL_NEXT = null;
+let WHEEL_LAST_SPIN_SHOWN = 0;
 let WHEEL_INITIAL_DONE = false;
 let AUTO_SPIN = false, AUTO_TIMER = null, EXIT_TIMER = null;
 let PENDING_ENDED = null;
@@ -290,7 +290,6 @@ async function openRoom(tid){
     ACTIVE_TID = tid;
     IS_ADMIN = info.is_admin;
     IS_PARTICIPANT = info.is_participant;
-    // Сброс состояния колеса при входе
     WHEEL_LOCK = false; WHEEL_NEXT = null; WHEEL_LAST_SPIN_SHOWN = 0;
     WHEEL_INITIAL_DONE = false; WHEEL_ANGLE = 0;
     PENDING_ENDED = null;
@@ -370,7 +369,6 @@ function wsSend(o){ if(WS && WS.readyState===1) WS.send(JSON.stringify(o)); }
 
 // ===== Обработка окончания турнира =====
 function handleTournamentEnded(msg){
-  // Если крутится колесо или открыта модалка — откладываем
   if(GAME_TYPE === 'wheel' && WHEEL_LOCK){
     PENDING_ENDED = msg;
     return;
@@ -413,10 +411,7 @@ function _showEndedModal(msg){
     remaining--;
     const cdel = document.getElementById("cd");
     if(cdel) cdel.textContent = `Возврат в меню через ${remaining}…`;
-    if(remaining <= 0){
-      clearInterval(tick);
-      exitRoom();
-    }
+    if(remaining <= 0){ clearInterval(tick); exitRoom(); }
   }, 1000);
   clearExitTimer();
   EXIT_TIMER = setTimeout(()=>{ clearInterval(tick); exitRoom(); }, countdown * 1000 + 200);
@@ -526,13 +521,8 @@ function makeCard(c){
 function renderWheel(s){
   LAST_STATE = s;
 
-  // 1. Если идёт анимация/модалка — просто запоминаем state, ничего не перерисовываем
-  if(WHEEL_LOCK){
-    WHEEL_NEXT = s;
-    return;
-  }
+  if(WHEEL_LOCK){ WHEEL_NEXT = s; return; }
 
-  // 2. Первая отрисовка после входа — просто рисуем
   if(!WHEEL_INITIAL_DONE){
     WHEEL_INITIAL_DONE = true;
     WHEEL_LAST_SPIN_SHOWN = s.spin_count;
@@ -540,15 +530,31 @@ function renderWheel(s){
     return;
   }
 
-  // 3. Обнаруживаем НОВЫЙ спин ПЕРЕД любой отрисовкой
   if(s.spin_count > WHEEL_LAST_SPIN_SHOWN && s.last_spin){
-    // НЕ обновляем список — сразу запускаем анимацию
     startSpinAnimation(s);
     return;
   }
 
-  // 4. Ничего нового — рисуем актуальный state
   drawWheelUI(s);
+}
+
+function updateWheelDOMOnly(s){
+  els.rmCounter.textContent = `🎡 На колесе: ${(s.active||[]).length} игроков`;
+  const plist = document.querySelector(".p-list");
+  if(!plist) return;
+  const activeArr = s.active || [];
+  const eliminatedArr = s.eliminated || [];
+  const h3 = document.querySelector(".participants h3");
+  if(h3) h3.textContent = `👥 Участники (${activeArr.length + eliminatedArr.length})`;
+  let html = "";
+  activeArr.forEach(p => {
+    html += `<div class="p-row"><span>🟢 ${escapeHtml(p.name)}</span><span>в игре</span></div>`;
+  });
+  eliminatedArr.slice().sort((a,b)=>b.place-a.place).forEach(p => {
+    const cls = p.place === 1 ? "p-row win" : "p-row elim";
+    html += `<div class="${cls}"><span>${p.place===1?"🏆":"❌"} ${escapeHtml(p.name)}</span><span>место ${p.place}</span></div>`;
+  });
+  plist.innerHTML = html;
 }
 
 function drawWheelUI(s){
@@ -612,6 +618,7 @@ function drawWheel(canvas, active){
     ctx.fillStyle="#94a3b8";ctx.font="bold 26px sans-serif";ctx.textAlign="center";ctx.textBaseline="middle";
     ctx.fillText("Ожидание",cx,cy);return;
   }
+  // рисуем сектора. Указатель в точке угла -π/2 (вверху).
   for(let i=0;i<n;i++){
     const a0=(i/n)*Math.PI*2-Math.PI/2+WHEEL_ANGLE;
     const a1=((i+1)/n)*Math.PI*2-Math.PI/2+WHEEL_ANGLE;
@@ -634,7 +641,7 @@ function startSpinAnimation(s){
   WHEEL_LOCK = true;
   WHEEL_LAST_SPIN_SHOWN = s.spin_count;
 
-  // Восстанавливаем массив ДО выбывания: вставляем eliminated на его sector_index
+  // Восстанавливаем массив до выбывания
   const activeWithElim = s.active.slice();
   activeWithElim.splice(s.last_spin.sector_index, 0, s.last_spin.eliminated);
 
@@ -645,7 +652,10 @@ function startSpinAnimation(s){
   const idx = s.last_spin.sector_index;
   const baseAngle = WHEEL_ANGLE;
 
-  // Целевой угол: центр сектора idx должен быть под указателем (угол -π/2 сверху)
+  // ВАЖНО: указатель сверху. Центр сектора idx должен оказаться в точке -π/2.
+  // Сектор i занимает [i/n*2π - π/2 + WA, (i+1)/n*2π - π/2 + WA].
+  // Центр сектора = (i+0.5)/n*2π - π/2 + WA.
+  // Приравниваем к -π/2 + 2π*k → WA = -(idx+0.5)/n*2π + 2π*k.
   const targetBase = -(idx + 0.5) / n * Math.PI * 2;
   let delta = (targetBase - baseAngle) % (Math.PI * 2);
   if(delta < 0) delta += Math.PI * 2;
@@ -658,19 +668,19 @@ function startSpinAnimation(s){
 
   function frame(t){
     const k = Math.min(1, (t - start) / duration);
-    const eased = 1 - Math.pow(1 - k, 4);  // плавное торможение
+    const eased = 1 - Math.pow(1 - k, 4);
     WHEEL_ANGLE = startA + (target - startA) * eased;
     const c = document.getElementById("wheel");
-    if(c) drawWheel(c, activeWithElim);  // рисуем со СТАРЫМ составом
+    if(c) drawWheel(c, activeWithElim);
     if(k < 1){
       requestAnimationFrame(frame);
     } else {
-      // Колесо остановилось. Указатель точно на выбывшем.
+      // Остановились. Указатель точно на центре сектора idx (выбывший).
       WHEEL_ANGLE = target;
       const c2 = document.getElementById("wheel");
       if(c2) drawWheel(c2, activeWithElim);
 
-      // Модалка "выбывает X" — на 2.5 сек. Список НЕ трогаем.
+      // Модалка на 2.5 сек. Список и canvas НЕ трогаем.
       showModal("❌ Выбывает",
         `<b>${escapeHtml(s.last_spin.eliminated.name)}</b><br>покидает турнир!`, []);
 
@@ -678,12 +688,13 @@ function startSpinAnimation(s){
         hide(els.modal);
         WHEEL_LOCK = false;
 
-        // Применяем отложенный state (самый свежий) — обновляем список и колесо
+        // ВАЖНО: не перерисовываем canvas (указатель уже на выбывшем секторе,
+        // который сейчас исчезает из списка). Обновляем только список участников.
         const finalState = WHEEL_NEXT || s;
         WHEEL_NEXT = null;
-        drawWheelUI(finalState);
+        updateWheelDOMOnly(finalState);
 
-        // Если было отложено окончание турнира — показываем его
+        // Отложенное окончание
         if(PENDING_ENDED){
           const ended = PENDING_ENDED;
           PENDING_ENDED = null;
@@ -691,13 +702,12 @@ function startSpinAnimation(s){
           return;
         }
 
-        // Если турнир завершён — финал уже показан/будет показан сервером
         if(finalState.finished){
           stopAutoSpin();
           return;
         }
 
-        // Авто-кручение: следующий спин через 7 сек
+        // Авто-кручение через 7 сек
         if(AUTO_SPIN && (finalState.active||[]).length >= 2
            && ACTIVE_TID && WS && WS.readyState === 1){
           AUTO_TIMER = setTimeout(() => {
