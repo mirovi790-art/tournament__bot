@@ -31,6 +31,7 @@ def _display_name(u, uid):
 
 
 async def _enrich_names(bot, user_ids):
+    """С таймаутом 3 сек на каждый запрос."""
     result = {}
     async with SessionLocal() as s:
         for uid in user_ids:
@@ -38,7 +39,7 @@ async def _enrich_names(bot, user_ids):
             if u and u.first_name and u.first_name.strip():
                 result[uid] = u.first_name.strip(); continue
             try:
-                chat = await bot.get_chat(uid)
+                chat = await asyncio.wait_for(bot.get_chat(uid), timeout=3.0)
                 fn = (chat.first_name or "").strip()
                 un = (chat.username or "").strip()
                 if fn: result[uid] = fn
@@ -49,13 +50,16 @@ async def _enrich_names(bot, user_ids):
                 else:
                     if fn: u.first_name = fn
                     if un: u.username = un
+            except asyncio.TimeoutError:
+                logging.warning("get_chat(%s) timeout", uid)
+                result[uid] = _display_name(u, uid)
             except Exception as e:
                 logging.warning("get_chat(%s) failed: %s", uid, e)
-                if u and u.username and u.username.strip():
-                    result[uid] = "@" + u.username.strip()
-                else:
-                    result[uid] = f"Игрок {uid}"
-        await s.commit()
+                result[uid] = _display_name(u, uid)
+        try:
+            await s.commit()
+        except Exception as e:
+            logging.exception("commit enrich names: %s", e)
     return result
 
 
@@ -145,7 +149,6 @@ def create_app(bot):
             seen_tids = set()
             my_tours = []
 
-            # 1. Турниры, где я участник
             r = await s.execute(select(Participant).where(
                 Participant.user_id == user_id,
                 Participant.status.in_(("approved", "winner"))))
@@ -158,7 +161,6 @@ def create_app(bot):
                                  "game_type": t.game_type, "my_status": p.status,
                                  "prize": t.prize or ""})
 
-            # 2. Турниры, где я создатель (даже если не участник)
             r = await s.execute(select(Tournament).where(
                 Tournament.creator_id == user_id,
                 Tournament.status.in_(("registration", "running", "paused"))))
@@ -169,7 +171,6 @@ def create_app(bot):
                                  "game_type": t.game_type, "my_status": "creator",
                                  "prize": t.prize or ""})
 
-            # 3. Если админ/владелец — все активные колёса для прокрута
             if is_admin:
                 r = await s.execute(select(Tournament).where(
                     Tournament.game_type == "wheel",
