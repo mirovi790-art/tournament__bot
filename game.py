@@ -3,11 +3,12 @@ import time
 from collections import Counter
 from itertools import combinations
 
-# ============ ПОКЕРНЫЙ ДВИЖОК ============
 RANKS = "23456789TJQKA"
 SUITS = "shdc"
 RANK_MAP = {r: i for i, r in enumerate(RANKS)}
 SUIT_SYM = {"s": "♠", "h": "♥", "d": "♦", "c": "♣"}
+
+MAX_TABLE = 7
 
 
 def make_deck():
@@ -86,27 +87,28 @@ class PokerPlayer:
         self.place = None
 
 
-class PokerGame:
-    def __init__(self, tid, players, start_stack=1000, turn_time=20, blind_interval=5):
+class _Table:
+    """Игровой стол (макс. MAX_TABLE игроков)."""
+
+    def __init__(self, tid, table_id, players, start_stack, parent):
         self.tid = tid
-        self.turn_time = turn_time
-        self.blind_interval = blind_interval
-        self.small_blind = 10
-        self.big_blind = 20
+        self.table_id = table_id
+        self.parent = parent
+        self.players = [PokerPlayer(p["user_id"], p["name"], start_stack) for p in players]
         self.dealer_idx = -1
         self.phase = "waiting"
         self.community = []
         self.pot = 0
         self.current_bet = 0
-        self.min_raise = self.big_blind
+        self.min_raise = parent.big_blind
         self.turn_idx = -1
         self.turn_deadline = 0
         self.hand_number = 0
         self.finished = False
         self.winner_info = None
         self.log = []
-        self.players = [PokerPlayer(p["user_id"], p["name"], start_stack) for p in players]
         self.deck = []
+        self._showdown_at = None
 
     def _alive(self):
         return [p for p in self.players if not p.folded]
@@ -145,7 +147,7 @@ class PokerGame:
     def start_hand(self):
         alive = [p for p in self.players if p.chips > 0]
         if len(alive) < 2:
-            self._finish()
+            self._finish_table()
             return
         self.hand_number += 1
         self.community = []
@@ -154,8 +156,9 @@ class PokerGame:
         self.phase = "preflop"
         self.deck = make_deck()
         random.shuffle(self.deck)
-        self.min_raise = self.big_blind
+        self.min_raise = self.parent.big_blind
         self.winner_info = None
+        self._showdown_at = None
         for p in self.players:
             p.cards = []
             p.bet = 0
@@ -170,15 +173,15 @@ class PokerGame:
             self.dealer_idx = (self.dealer_idx + 1) % len(self.players)
         sb_idx = self._next_idx(self.dealer_idx, lambda x: not x.folded)
         bb_idx = self._next_idx(sb_idx, lambda x: not x.folded)
-        self._post_blind(sb_idx, self.small_blind)
-        self._post_blind(bb_idx, self.big_blind)
-        self.current_bet = self.big_blind
+        self._post_blind(sb_idx, self.parent.small_blind)
+        self._post_blind(bb_idx, self.parent.big_blind)
+        self.current_bet = self.parent.big_blind
         for p in self.players:
             if not p.folded:
                 p.cards = [self.deck.pop(), self.deck.pop()]
         self.turn_idx = self._next_idx(bb_idx, lambda x: not x.folded and not x.all_in)
-        self.turn_deadline = time.time() + self.turn_time
-        self.log.append(f"--- Раздача #{self.hand_number} ---")
+        self.turn_deadline = time.time() + self.parent.turn_time
+        self.log.append(f"--- Стол {self.table_id + 1} · Раздача #{self.hand_number} ---")
         if self.turn_idx is None:
             self._advance_phase()
 
@@ -255,7 +258,7 @@ class PokerGame:
         else:
             self.turn_idx = self._next_idx(
                 self.turn_idx, lambda x: not x.folded and not x.all_in and x.chips > 0)
-            self.turn_deadline = time.time() + self.turn_time
+            self.turn_deadline = time.time() + self.parent.turn_time
         return True
 
     def check_timeout(self):
@@ -275,7 +278,7 @@ class PokerGame:
             p.bet = 0
             p.acted = False
         self.current_bet = 0
-        self.min_raise = self.big_blind
+        self.min_raise = self.parent.big_blind
         if self.phase == "preflop":
             self.community += [self.deck.pop(), self.deck.pop(), self.deck.pop()]
             self.phase = "flop"
@@ -308,7 +311,7 @@ class PokerGame:
             return
         self.turn_idx = self._next_idx(self.dealer_idx,
                                        lambda x: not x.folded and not x.all_in and x.chips > 0)
-        self.turn_deadline = time.time() + self.turn_time
+        self.turn_deadline = time.time() + self.parent.turn_time
 
     def _end_hand_by_fold(self):
         winners = self._alive()
@@ -320,6 +323,7 @@ class PokerGame:
         self.pot = 0
         self.winner_info = {"user_id": w.user_id, "name": w.name, "amount": w.chips}
         self.phase = "showdown"
+        self._showdown_at = time.time()
         self._post_hand()
 
     def _showdown(self):
@@ -344,6 +348,7 @@ class PokerGame:
         }
         self.pot = 0
         self.phase = "showdown"
+        self._showdown_at = time.time()
         self._post_hand()
 
     def _post_hand(self):
@@ -353,35 +358,36 @@ class PokerGame:
                 p.place = len(alive) + 1
         self.turn_idx = -1
         if len(alive) <= 1:
-            self._finish()
+            self._finish_table()
 
-    def _finish(self):
+    def _finish_table(self):
         self.finished = True
-        self.phase = "finished"
         alive = [p for p in self.players if p.chips > 0]
         if alive:
-            alive[0].place = 1
             self.winner_info = {
                 "user_id": alive[0].user_id,
                 "name": alive[0].name,
                 "amount": alive[0].chips,
-                "hand": "🏆 ПОБЕДИТЕЛЬ ТУРНИРА",
+                "hand": f"🏆 Победитель стола {self.table_id + 1}",
             }
+        self.parent._check_all_tables_finished()
 
     def to_dict(self, for_user_id=None):
         return {
             "type": "poker_state",
             "tid": self.tid,
+            "table_id": self.table_id,
+            "table_count": len(self.parent.tables),
             "phase": self.phase,
             "pot": self.pot,
             "community": [card_str(c) for c in self.community],
             "current_bet": self.current_bet,
             "min_raise": self.min_raise,
-            "big_blind": self.big_blind,
-            "small_blind": self.small_blind,
+            "big_blind": self.parent.big_blind,
+            "small_blind": self.parent.small_blind,
             "turn_idx": self.turn_idx,
             "turn_deadline": self.turn_deadline,
-            "turn_time": self.turn_time,
+            "turn_time": self.parent.turn_time,
             "dealer_idx": self.dealer_idx,
             "hand_number": self.hand_number,
             "finished": self.finished,
@@ -408,7 +414,104 @@ class PokerGame:
         }
 
 
-# ============ КОЛЕСО ФОРТУНЫ ============
+class PokerGame:
+    """Контейнер нескольких столов. Финализируется в один, когда игроков ≤ MAX_TABLE."""
+
+    def __init__(self, tid, players, start_stack=1000, turn_time=20, blind_interval=5):
+        self.tid = tid
+        self.turn_time = turn_time
+        self.blind_interval = blind_interval
+        self.small_blind = 10
+        self.big_blind = 20
+        self.finished = False
+        self.winner_info = None
+        self.tables: list[_Table] = []
+        self._distribute(players, start_stack)
+
+    def _distribute(self, players, start_stack):
+        n = len(players)
+        num_tables = max(1, (n + MAX_TABLE - 1) // MAX_TABLE)
+        groups = [[] for _ in range(num_tables)]
+        for i, p in enumerate(players):
+            groups[i % num_tables].append(p)
+        for i, grp in enumerate(groups):
+            self.tables.append(_Table(self.tid, i, grp, start_stack, self))
+
+    def start_hand(self):
+        for t in self.tables:
+            if not t.finished:
+                t.start_hand()
+
+    def action(self, user_id, act, amount=0):
+        for t in self.tables:
+            for p in t.players:
+                if p.user_id == user_id:
+                    return t.action(user_id, act, amount)
+        return False
+
+    def check_timeout(self):
+        changed = False
+        for t in self.tables:
+            if t.check_timeout():
+                changed = True
+        return changed
+
+    def _check_all_tables_finished(self):
+        # Проверяем: осталось всего игроков ≤ MAX_TABLE? → собираем final table
+        alive_players = []
+        for t in self.tables:
+            for p in t.players:
+                if p.chips > 0:
+                    alive_players.append({
+                        "user_id": p.user_id,
+                        "name": p.name,
+                        "chips": p.chips,
+                    })
+        if len(alive_players) <= 1:
+            # Турнир завершён
+            self.finished = True
+            if alive_players:
+                self.winner_info = {
+                    "user_id": alive_players[0]["user_id"],
+                    "name": alive_players[0]["name"],
+                    "amount": alive_players[0]["chips"],
+                    "hand": "🏆 ПОБЕДИТЕЛЬ ТУРНИРА",
+                }
+            return
+        # Если осталось ≤ MAX_TABLE игроков и сейчас больше одного стола — собираем final
+        if len(alive_players) <= MAX_TABLE and len([t for t in self.tables if not t.finished]) > 1:
+            self._make_final_table(alive_players)
+
+    def _make_final_table(self, alive_players):
+        # пересоздаём игроков с их фишками
+        players_data = [{"user_id": p["user_id"], "name": p["name"]} for p in alive_players]
+        old_tables = self.tables
+        self.tables = []
+        final = _Table(self.tid, 0, players_data, 0, self)
+        # восстанавливаем фишки
+        for p in final.players:
+            for old_p in alive_players:
+                if old_p["user_id"] == p.user_id:
+                    p.chips = old_p["chips"]
+                    break
+        final.start_hand()
+        self.tables.append(final)
+
+    def to_dict(self, for_user_id=None):
+        for t in self.tables:
+            for p in t.players:
+                if p.user_id == for_user_id:
+                    return t.to_dict(for_user_id=for_user_id)
+        # Юзер не найден ни за одним столом — выбыл
+        first = self.tables[0] if self.tables else None
+        if first:
+            d = first.to_dict(for_user_id=for_user_id)
+            d["you_eliminated"] = True
+            return d
+        return {"type": "poker_state", "phase": "eliminated", "players": [], "log": [],
+                "community": [], "pot": 0, "turn_idx": -1, "finished": True}
+
+
 class WheelGame:
     def __init__(self, tid, participants, prize):
         self.tid = tid
@@ -449,7 +552,6 @@ class WheelGame:
         }
 
 
-# ============ МЕНЕДЖЕР СОЕДИНЕНИЙ ============
 _active_poker: dict[int, PokerGame] = {}
 _active_wheel: dict[int, WheelGame] = {}
 _connections: dict[int, set] = {}
