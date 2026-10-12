@@ -2,6 +2,7 @@ import asyncio
 import html
 import logging
 import os
+import time as _time
 import uvicorn
 from datetime import datetime, timedelta
 from aiogram import Bot, Dispatcher, Router, F
@@ -33,6 +34,17 @@ SEP = "➖➖➖➖➖➖➖➖➖"
 logging.basicConfig(level=logging.INFO)
 router = Router()
 _finalized_tids = set()
+
+# Хранилище для фоновых задач (защита от GC)
+_bg_tasks: set[asyncio.Task] = set()
+
+
+def _spawn(coro):
+    """Безопасный запуск фоновой задачи с сохранением ссылки."""
+    t = asyncio.create_task(coro)
+    _bg_tasks.add(t)
+    t.add_done_callback(lambda x: _bg_tasks.discard(x))
+    return t
 
 
 def esc(s): return html.escape(s or "")
@@ -68,6 +80,7 @@ def _display_name(u, uid):
 
 
 async def _enrich_names(bot, user_ids):
+    """С таймаутом 3 сек на каждый запрос, чтобы не висеть."""
     result = {}
     async with SessionLocal() as s:
         for uid in user_ids:
@@ -75,7 +88,7 @@ async def _enrich_names(bot, user_ids):
             if u and u.first_name and u.first_name.strip():
                 result[uid] = u.first_name.strip(); continue
             try:
-                chat = await bot.get_chat(uid)
+                chat = await asyncio.wait_for(bot.get_chat(uid), timeout=3.0)
                 fn = (chat.first_name or "").strip()
                 un = (chat.username or "").strip()
                 if fn: result[uid] = fn
@@ -86,13 +99,16 @@ async def _enrich_names(bot, user_ids):
                 else:
                     if fn: u.first_name = fn
                     if un: u.username = un
+            except asyncio.TimeoutError:
+                logging.warning("get_chat(%s) timeout", uid)
+                result[uid] = _display_name(u, uid)
             except Exception as e:
                 logging.warning("get_chat(%s) failed: %s", uid, e)
-                if u and u.username and u.username.strip():
-                    result[uid] = "@" + u.username.strip()
-                else:
-                    result[uid] = f"Игрок {uid}"
-        await s.commit()
+                result[uid] = _display_name(u, uid)
+        try:
+            await s.commit()
+        except Exception as e:
+            logging.exception("commit enrich names: %s", e)
     return result
 
 
@@ -832,7 +848,6 @@ async def cb_player_view(cb: CallbackQuery):
 
 @router.callback_query(F.data.startswith("tt_spin_"))
 async def cb_spin_wheel(cb: CallbackQuery):
-    """Ручной запуск колеса из бота (только для админов/создателя)."""
     if not await _is_admin(cb.from_user.id):
         await cb.answer("Нет доступа", show_alert=True); return
     tid = int(cb.data.split("_")[-1])
@@ -1256,31 +1271,34 @@ async def cb_decline_inv(cb: CallbackQuery):
 
 # ============ ФИНАЛИЗАЦИЯ ============
 async def _notify_tournament_ended(bot, tname, tprize, winner_id, winner_name, manual, user_ids, total):
-    await asyncio.sleep(7)
-    for uid in user_ids:
-        try:
-            if manual:
-                text = (f"<b>🏁 ТУРНИР ЗАВЕРШЁН</b>\n{SEP}\n"
-                        f"🏆 <b>{esc(tname)}</b>\n{SEP}\n"
-                        "<b>Турнир остановлен администратором.</b>\n"
-                        f"👥 <b>Участников:</b> <code>{total}</code>")
-            elif winner_id and winner_id == uid:
-                text = (f"<b>🏁 ТУРНИР ЗАВЕРШЁН!</b>\n{SEP}\n"
-                        f"🏆 <b>{esc(tname)}</b>\n{SEP}\n"
-                        f"🥇 <b>Победитель:</b> <code>{esc(winner_name or '—')}</code>\n"
-                        f"🎁 <b>Приз:</b> <i>{esc(tprize)}</i>\n"
-                        f"👥 <b>Участников:</b> <code>{total}</code>\n\n"
-                        "<blockquote>🎉 Поздравляем!</blockquote>")
-            else:
-                text = (f"<b>🏁 ТУРНИР ЗАВЕРШЁН!</b>\n{SEP}\n"
-                        f"🏆 <b>{esc(tname)}</b>\n{SEP}\n"
-                        f"🥇 <b>Победитель:</b> <code>{esc(winner_name or '—')}</code>\n"
-                        f"🎁 <b>Приз:</b> <i>{esc(tprize)}</i>\n"
-                        f"👥 <b>Участников:</b> <code>{total}</code>\n\n"
-                        "<blockquote>Спасибо за участие!</blockquote>")
-            await bot.send_message(uid, text)
-        except Exception as e:
-            logging.exception("notify fail: %s", e)
+    try:
+        await asyncio.sleep(7)
+        for uid in user_ids:
+            try:
+                if manual:
+                    text = (f"<b>🏁 ТУРНИР ЗАВЕРШЁН</b>\n{SEP}\n"
+                            f"🏆 <b>{esc(tname)}</b>\n{SEP}\n"
+                            "<b>Турнир остановлен администратором.</b>\n"
+                            f"👥 <b>Участников:</b> <code>{total}</code>")
+                elif winner_id and winner_id == uid:
+                    text = (f"<b>🏁 ТУРНИР ЗАВЕРШЁН!</b>\n{SEP}\n"
+                            f"🏆 <b>{esc(tname)}</b>\n{SEP}\n"
+                            f"🥇 <b>Победитель:</b> <code>{esc(winner_name or '—')}</code>\n"
+                            f"🎁 <b>Приз:</b> <i>{esc(tprize)}</i>\n"
+                            f"👥 <b>Участников:</b> <code>{total}</code>\n\n"
+                            "<blockquote>🎉 Поздравляем!</blockquote>")
+                else:
+                    text = (f"<b>🏁 ТУРНИР ЗАВЕРШЁН!</b>\n{SEP}\n"
+                            f"🏆 <b>{esc(tname)}</b>\n{SEP}\n"
+                            f"🥇 <b>Победитель:</b> <code>{esc(winner_name or '—')}</code>\n"
+                            f"🎁 <b>Приз:</b> <i>{esc(tprize)}</i>\n"
+                            f"👥 <b>Участников:</b> <code>{total}</code>\n\n"
+                            "<blockquote>Спасибо за участие!</blockquote>")
+                await bot.send_message(uid, text)
+            except Exception as e:
+                logging.warning("notify fail uid=%s: %s", uid, e)
+    except Exception as e:
+        logging.exception("notify task crashed: %s", e)
 
 
 async def _finalize_tournament(bot, tid, winner_id=None, winner_name=None, manual=False):
@@ -1310,7 +1328,8 @@ async def _finalize_tournament(bot, tid, winner_id=None, winner_name=None, manua
             "manual": manual})
     except Exception as e:
         logging.exception("broadcast final fail: %s", e)
-    asyncio.create_task(_notify_tournament_ended(
+    # С сохранением ссылки — защита от GC
+    _spawn(_notify_tournament_ended(
         bot, tname, tprize, winner_id, winner_name, manual, user_ids, total))
 
 
@@ -1359,6 +1378,22 @@ async def game_ticker(bot):
         await asyncio.sleep(1)
 
 
+async def _periodic_cleanup():
+    """Чистка подвисших соединений и памяти каждые 60 сек."""
+    while True:
+        try:
+            await asyncio.sleep(60)
+            # чистим пустые sets
+            for tid in list(gm._connections.keys()):
+                if not gm._connections[tid]:
+                    gm._connections.pop(tid, None)
+            # чистим завершённые фоновые задачи
+            for t in list(_bg_tasks):
+                if t.done(): _bg_tasks.discard(t)
+        except Exception as e:
+            logging.exception("cleanup error: %s", e)
+
+
 async def main():
     if not BOT_TOKEN: raise SystemExit("❌ BOT_TOKEN не задан")
     await init_db()
@@ -1368,10 +1403,22 @@ async def main():
     cfg = uvicorn.Config(app, host=HOST, port=PORT, log_level="info", loop="asyncio")
     server = uvicorn.Server(cfg)
     logging.info("🚀 Бот и Mini App на %s:%s", HOST, PORT)
+
+    async def safe_polling():
+        while True:
+            try:
+                await dp.start_polling(bot, allowed_updates=dp.resolve_used_update_types())
+                break
+            except Exception as e:
+                logging.exception("Polling crashed, restart in 5s: %s", e)
+                await asyncio.sleep(5)
+
     await asyncio.gather(
-        dp.start_polling(bot, allowed_updates=dp.resolve_used_update_types()),
+        safe_polling(),
         server.serve(),
-        game_ticker(bot))
+        game_ticker(bot),
+        _periodic_cleanup(),
+    )
 
 
 if __name__ == "__main__":
