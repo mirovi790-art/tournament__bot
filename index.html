@@ -190,6 +190,7 @@ let GAME_TYPE = null, LAST_STATE = null;
 let IS_CREATOR = false, IS_PARTICIPANT = false;
 let WHEEL_ANGLE = 0, WHEEL_SPINNING = false;
 let AUTO_SPIN = false, AUTO_TIMER = null, EXIT_TIMER = null;
+let PENDING_ENDED = null;  // отложенное событие tournament_ended (ждёт окончания анимации)
 
 function show(el){el.classList.remove("hidden");}
 function hide(el){el.classList.add("hidden");}
@@ -240,7 +241,6 @@ async function loadTournaments(){
   try{
     const r = await fetch(`/api/profile?initData=${encodeURIComponent(INIT_DATA)}`);
     const p = await r.json();
-    // Сервер уже отфильтровал завершённые
     const tours = p.tournaments || [];
     if(!tours.length){
       els.trList.innerHTML = '<div class="empty">📭 Нет активных турниров</div>';
@@ -300,6 +300,7 @@ async function openRoom(tid){
 
 function exitRoom(){
   stopAutoSpin(); clearExitTimer();
+  PENDING_ENDED = null;
   if(WS) try{WS.close();}catch(e){}
   WS = null; ACTIVE_TID = null; GAME_TYPE = null; LAST_STATE = null;
   hide(els.roomView); hide(els.leaveBtn); hide(els.adminToolbar);
@@ -309,7 +310,7 @@ function exitRoom(){
   document.querySelector('.tab[data-tab="tournaments"]').classList.add("active");
   show(els.tournamentsView);
   loadTournaments();
-  loadProfile();  // обновим счётчик побед
+  loadProfile();
 }
 
 function connectWS(tid){
@@ -343,7 +344,6 @@ function connectWS(tid){
       EXIT_TIMER = setTimeout(()=>exitRoom(), 5000);
     }
     else if(msg.type === "tournament_ended"){
-      stopAutoSpin();
       handleTournamentEnded(msg);
     }
     else if(msg.type === "tournament_cancelled"){
@@ -360,7 +360,45 @@ function connectWS(tid){
 }
 function wsSend(o){ if(WS && WS.readyState===1) WS.send(JSON.stringify(o)); }
 
-function handleTournamentEnded(msg){
+// ===== Обработка окончания турнира =====
+function handleTournamentEnded(msg, isRetry){
+  // Ручное завершение — показываем сразу
+  if(msg.manual){
+    _showEndedModal(msg);
+    return;
+  }
+  // Для авто-финала колеса: показываем только после полной остановки анимации
+  if(GAME_TYPE === 'wheel'){
+    if(WHEEL_SPINNING){
+      // анимация в процессе — запомним событие
+      PENDING_ENDED = msg;
+      return;
+    }
+    if(!isRetry && (!LAST_STATE || !LAST_STATE.last_spin)){
+      // wheel_state ещё не пришёл — подождём немного
+      setTimeout(() => handleTournamentEnded(msg, true), 1500);
+      return;
+    }
+    if(LAST_STATE && LAST_STATE.last_spin &&
+       LAST_STATE.last_spin._shownFor === LAST_STATE.spin_count){
+      // анимация уже проиграна ранее — показываем финал
+      _showEndedModal(msg);
+      return;
+    }
+    if(isRetry){
+      // ждали, но не дождались — показываем как есть
+      _showEndedModal(msg);
+      return;
+    }
+    // анимация вот-вот начнётся — отложим
+    PENDING_ENDED = msg;
+    return;
+  }
+  // Покер и прочее — сразу
+  _showEndedModal(msg);
+}
+
+function _showEndedModal(msg){
   const manual = !!msg.manual;
   const winnerId = msg.winner_id;
   const winnerName = msg.winner_name;
@@ -384,7 +422,6 @@ function handleTournamentEnded(msg){
     body = "Победитель не определён.";
     countdown = 5;
   }
-  // показываем модалку с обратным отсчётом
   let remaining = countdown;
   els.modalTitle.textContent = title;
   els.modalBody.innerHTML = body + `<div class="countdown-text" id="cd">Возврат в меню через ${remaining}…</div>`;
@@ -405,6 +442,7 @@ function handleTournamentEnded(msg){
   EXIT_TIMER = setTimeout(()=>{ clearInterval(tick); exitRoom(); }, countdown * 1000 + 200);
 }
 
+// ===== POKER =====
 function renderPoker(s){
   LAST_STATE = s;
   if(s.table_id !== undefined && s.table_count !== undefined){
@@ -495,7 +533,6 @@ function renderPoker(s){
     tfill.style.width = Math.min(100,(rem/total2)*100)+"%";
   }
 }
-
 function makeCard(c){
   const div = document.createElement("div");
   const red = c.includes("♥")||c.includes("♦");
@@ -505,10 +542,11 @@ function makeCard(c){
   return div;
 }
 
+// ===== WHEEL =====
 function renderWheel(s){
   LAST_STATE = s;
   els.rmCounter.textContent = `🎡 На колесе: ${(s.active||[]).length} игроков`;
-  if(s.finished) stopAutoSpin();
+  // НЕ останавливаем AUTO_SPIN здесь — он остановится после показа победителя
 
   const canSpin = IS_ADMIN && !s.finished && (s.active||[]).length >= 2;
   let btnHTML = "";
@@ -554,6 +592,7 @@ function renderWheel(s){
     s.last_spin._shownFor = s.spin_count;
     animateSpin(s);
   }
+  // Убрали показ победителя здесь — он показывается только в конце animateSpin
 }
 
 function drawWheel(canvas, active){
@@ -594,6 +633,7 @@ function animateSpin(s){
   const canvas = document.getElementById("wheel");
   if(!canvas){ WHEEL_SPINNING = false; return; }
 
+  // Правильно вставляем выбывшего на его индекс
   const activeBefore = s.active.slice();
   activeBefore.splice(s.last_spin.sector_index, 0, s.last_spin.eliminated);
   const n = activeBefore.length;
@@ -624,24 +664,43 @@ function animateSpin(s){
       if(c2) drawWheel(c2, oldActive);
       WHEEL_SPINNING = false;
 
-      // Показываем модалку на 2.5 сек
+      // 1. Показываем модалку выбывшего на 2.5 сек
       showModal("❌ Выбывает", `<b>${escapeHtml(s.last_spin.eliminated.name)}</b><br>покидает турнир!`, []);
-      setTimeout(()=>{ if(!ACTIVE_TID || s.finished) return; hide(els.modal); }, 2500);
 
-      // Если турнир завершён — остановим авто
-      if(s.finished || (s.active||[]).length < 2){
-        stopAutoSpin();
-        if(LAST_STATE) renderWheel(LAST_STATE);
-        return;
-      }
-      // Авто-старт следующего вращения через 7 сек
-      if(AUTO_SPIN && ACTIVE_TID && WS && WS.readyState===1){
-        AUTO_TIMER = setTimeout(() => {
-          if(AUTO_SPIN && ACTIVE_TID && WS && WS.readyState===1){
-            wsSend({type:"spin"});
+      setTimeout(() => {
+        const finished = (LAST_STATE && LAST_STATE.finished) || PENDING_ENDED;
+
+        // 2а. Турнир завершён — показываем финал
+        if(finished){
+          hide(els.modal);
+          stopAutoSpin();
+          let fin = PENDING_ENDED;
+          if(!fin && LAST_STATE && LAST_STATE.winner){
+            fin = { type:"tournament_ended",
+                    winner_id: LAST_STATE.winner.user_id,
+                    winner_name: LAST_STATE.winner.name,
+                    manual: false, tid: ACTIVE_TID };
           }
-        }, 7000);
-      }
+          PENDING_ENDED = null;
+          if(fin){
+            setTimeout(() => _showEndedModal(fin), 400);
+          }
+          return;
+        }
+
+        // 2б. Не завершён — продолжаем авто-кручение через 7 сек
+        hide(els.modal);
+        if(AUTO_SPIN && ACTIVE_TID && WS && WS.readyState===1){
+          AUTO_TIMER = setTimeout(() => {
+            if(AUTO_SPIN && ACTIVE_TID && WS && WS.readyState===1){
+              wsSend({type:"spin"});
+            }
+          }, 7000);
+        } else {
+          stopAutoSpin();
+          if(LAST_STATE) renderWheel(LAST_STATE);
+        }
+      }, 2500);
     }
   }
   requestAnimationFrame(frame);
