@@ -67,35 +67,6 @@ async def _waiting_state(tid, t, user_id):
             "winner": None, "prize": t.prize or "🏆 Приз", "last_spin": None}
 
 
-async def finalize_tournament_manual(bot, tid):
-    """Ручное завершение из Mini App. Победа НЕ засчитывается."""
-    async with SessionLocal() as s:
-        t = await s.get(Tournament, tid)
-        if not t or t.status == "finished":
-            return
-        t.status = "finished"
-        tname = t.name
-        r = await s.execute(select(Participant).where(Participant.tournament_id == tid))
-        parts = r.scalars().all()
-        total = len(parts)
-        await s.commit()
-    gm._active_poker.pop(tid, None); gm._active_wheel.pop(tid, None)
-    try:
-        await gm.broadcast(tid, {"type": "tournament_ended", "tid": tid,
-                                 "winner_id": None, "winner_name": None, "manual": True})
-    except Exception as e:
-        logging.exception("finalize broadcast: %s", e)
-    for p in parts:
-        try:
-            await bot.send_message(p.user_id,
-                f"<b>🏁 ТУРНИР ЗАВЕРШЁН</b>\n➖➖➖➖➖➖➖➖➖\n"
-                f"🏆 <b>{_esc(tname)}</b>\n➖➖➖➖➖➖➖➖➖\n"
-                "<b>Турнир остановлен администратором.</b>\n"
-                f"👥 <b>Участников:</b> <code>{total}</code>")
-        except Exception as e:
-            logging.exception("notify fail: %s", e)
-
-
 def create_app(bot):
     app = FastAPI(title="Tournament Mini App")
 
@@ -135,9 +106,7 @@ def create_app(bot):
             for p in parts:
                 t = await s.get(Tournament, p.tournament_id)
                 if not t: continue
-                # ТОЛЬКО АКТИВНЫЕ
-                if t.status in ("finished", "cancelled"):
-                    continue
+                if t.status in ("finished", "cancelled"): continue
                 my_tours.append({"tid": t.id, "name": t.name, "status": t.status,
                                  "game_type": t.game_type, "my_status": p.status,
                                  "prize": t.prize or ""})
@@ -233,7 +202,7 @@ async def _handle(bot, ws, tid, user_id, msg, t, is_admin):
     if mtype == "leave_tournament":
         await _handle_leave(ws, tid, user_id, t); return
     if is_admin and mtype == "admin_end_tournament":
-        await finalize_tournament_manual(bot, tid); return
+        await _admin_end(bot, tid); return
     if is_admin and mtype == "admin_pause_tournament":
         await _admin_pause(tid, True); return
     if is_admin and mtype == "admin_resume_tournament":
@@ -265,6 +234,16 @@ async def _handle(bot, ws, tid, user_id, msg, t, is_admin):
             await gm.broadcast(tid, g.to_dict())
         elif mtype == "request_state":
             await ws.send_json(g.to_dict())
+
+
+async def _admin_end(bot, tid):
+    from main import _finalize_tournament, _finalized_tids
+    gm._active_poker.pop(tid, None); gm._active_wheel.pop(tid, None)
+    _finalized_tids.discard(tid)
+    try:
+        await _finalize_tournament(bot, tid, manual=True)
+    except Exception as e:
+        logging.exception("admin_end fail: %s", e)
 
 
 async def _admin_pause(tid, pause):
