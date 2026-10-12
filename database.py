@@ -46,6 +46,7 @@ class Tournament(Base):
     start_stack: Mapped[int] = mapped_column(Integer, default=1000)
     turn_time: Mapped[int] = mapped_column(Integer, default=20)
     blind_interval: Mapped[int] = mapped_column(Integer, default=5)
+    min_players: Mapped[int] = mapped_column(Integer, default=2)
     prize: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
@@ -56,6 +57,7 @@ class Participant(Base):
     tournament_id: Mapped[int] = mapped_column(ForeignKey("tournaments.id"))
     user_id: Mapped[int] = mapped_column(BigInteger)
     status: Mapped[str] = mapped_column(String(16), default="pending")
+    password: Mapped[str | None] = mapped_column(String(16), nullable=True)
     chips: Mapped[int] = mapped_column(Integer, default=0)
     place: Mapped[int | None] = mapped_column(Integer, nullable=True)
     joined_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
@@ -64,3 +66,21 @@ class Participant(Base):
 async def init_db():
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+    # авто-миграции
+    async with engine.begin() as conn:
+        try:
+            res = await conn.exec_driver_sql("PRAGMA table_info(tournaments)")
+            cols = [row[1] for row in res.fetchall()]
+            if "min_players" not in cols:
+                await conn.exec_driver_sql(
+                    "ALTER TABLE tournaments ADD COLUMN min_players INTEGER DEFAULT 2")
+        except Exception:
+            pass
+        try:
+            res = await conn.exec_driver_sql("PRAGMA table_info(participants)")
+            cols = [row[1] for row in res.fetchall()]
+            if "password" not in cols:
+                await conn.exec_driver_sql(
+                    "ALTER TABLE participants ADD COLUMN password VARCHAR(16)")
+        except Exception:
+            pass
