@@ -318,7 +318,6 @@ async def msg_find_player(message: Message, state: FSMContext):
         if not u:
             await message.answer("<blockquote>❌ Игрок не найден в базе.</blockquote>")
             return
-        # Статистика
         wins = (await s.execute(select(func.count()).select_from(Participant)
             .where(Participant.user_id == target_id,
                    Participant.status == "winner"))).scalar() or 0
@@ -365,7 +364,6 @@ async def msg_find_player(message: Message, state: FSMContext):
     lines.append("")
     lines.append("<blockquote>Можешь ввести ещё игрока или нажать ⬅️</blockquote>")
     await message.answer("\n".join(lines))
-    # остаёмся в том же FSM, чтобы можно было искать ещё
 
 
 @router.message(StateFilter(None), F.text == "ℹ️ Помощь")
@@ -1190,6 +1188,35 @@ async def cb_decline_inv(cb: CallbackQuery):
 
 
 # ============ ФИНАЛИЗАЦИЯ ============
+async def _notify_tournament_ended(bot, tname, tprize, winner_id, winner_name, manual, user_ids, total):
+    """Фоновая рассылка с задержкой 7 сек."""
+    await asyncio.sleep(7)
+    for uid in user_ids:
+        try:
+            if manual:
+                text = (f"<b>🏁 ТУРНИР ЗАВЕРШЁН</b>\n{SEP}\n"
+                        f"🏆 <b>{esc(tname)}</b>\n{SEP}\n"
+                        "<b>Турнир остановлен администратором.</b>\n"
+                        f"👥 <b>Участников:</b> <code>{total}</code>")
+            elif winner_id and winner_id == uid:
+                text = (f"<b>🏁 ТУРНИР ЗАВЕРШЁН!</b>\n{SEP}\n"
+                        f"🏆 <b>{esc(tname)}</b>\n{SEP}\n"
+                        f"🥇 <b>Победитель:</b> <code>{esc(winner_name or '—')}</code>\n"
+                        f"🎁 <b>Приз:</b> <i>{esc(tprize)}</i>\n"
+                        f"👥 <b>Участников:</b> <code>{total}</code>\n\n"
+                        "<blockquote>🎉 Поздравляем!</blockquote>")
+            else:
+                text = (f"<b>🏁 ТУРНИР ЗАВЕРШЁН!</b>\n{SEP}\n"
+                        f"🏆 <b>{esc(tname)}</b>\n{SEP}\n"
+                        f"🥇 <b>Победитель:</b> <code>{esc(winner_name or '—')}</code>\n"
+                        f"🎁 <b>Приз:</b> <i>{esc(tprize)}</i>\n"
+                        f"👥 <b>Участников:</b> <code>{total}</code>\n\n"
+                        "<blockquote>Спасибо за участие!</blockquote>")
+            await bot.send_message(uid, text)
+        except Exception as e:
+            logging.exception("notify fail: %s", e)
+
+
 async def _finalize_tournament(bot, tid, winner_id=None, winner_name=None, manual=False):
     async with SessionLocal() as s:
         t = await s.get(Tournament, tid)
@@ -1208,8 +1235,10 @@ async def _finalize_tournament(bot, tid, winner_id=None, winner_name=None, manua
         r = await s.execute(select(Participant).where(Participant.tournament_id == tid))
         parts = r.scalars().all()
         total = len(parts)
+        user_ids = [p.user_id for p in parts]
         await s.commit()
 
+    # Broadcast в Mini App — сразу
     try:
         await gm.broadcast(tid, {
             "type": "tournament_ended", "tid": tid,
@@ -1220,30 +1249,9 @@ async def _finalize_tournament(bot, tid, winner_id=None, winner_name=None, manua
     except Exception as e:
         logging.exception("broadcast final fail: %s", e)
 
-    for p in parts:
-        try:
-            if manual:
-                text = (f"<b>🏁 ТУРНИР ЗАВЕРШЁН</b>\n{SEP}\n"
-                        f"🏆 <b>{esc(tname)}</b>\n{SEP}\n"
-                        "<b>Турнир остановлен администратором.</b>\n"
-                        f"👥 <b>Участников:</b> <code>{total}</code>")
-            elif winner_id and winner_id == p.user_id:
-                text = (f"<b>🏁 ТУРНИР ЗАВЕРШЁН!</b>\n{SEP}\n"
-                        f"🏆 <b>{esc(tname)}</b>\n{SEP}\n"
-                        f"🥇 <b>Победитель:</b> <code>{esc(winner_name or '—')}</code>\n"
-                        f"🎁 <b>Приз:</b> <i>{esc(tprize)}</i>\n"
-                        f"👥 <b>Участников:</b> <code>{total}</code>\n\n"
-                        "<blockquote>🎉 Поздравляем!</blockquote>")
-            else:
-                text = (f"<b>🏁 ТУРНИР ЗАВЕРШЁН!</b>\n{SEP}\n"
-                        f"🏆 <b>{esc(tname)}</b>\n{SEP}\n"
-                        f"🥇 <b>Победитель:</b> <code>{esc(winner_name or '—')}</code>\n"
-                        f"🎁 <b>Приз:</b> <i>{esc(tprize)}</i>\n"
-                        f"👥 <b>Участников:</b> <code>{total}</code>\n\n"
-                        "<blockquote>Спасибо за участие!</blockquote>")
-            await bot.send_message(p.user_id, text)
-        except Exception as e:
-            logging.exception("notify fail: %s", e)
+    # Рассылка в бота — через 7 сек (фоном, не блокируя тикер)
+    asyncio.create_task(_notify_tournament_ended(
+        bot, tname, tprize, winner_id, winner_name, manual, user_ids, total))
 
 
 async def game_ticker(bot):
