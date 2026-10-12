@@ -61,7 +61,6 @@ async def _upsert_user(fu):
 
 
 def _display_name(u, uid):
-    """Имя: first_name → @username → Игрок #id."""
     if u:
         if u.first_name and u.first_name.strip(): return u.first_name.strip()
         if u.username and u.username.strip(): return "@" + u.username.strip()
@@ -69,29 +68,19 @@ def _display_name(u, uid):
 
 
 async def _enrich_names(bot, user_ids):
-    """
-    Для каждого uid без имени в БД запрашивает данные из Telegram (bot.get_chat).
-    Возвращает dict {uid: display_name}. Сохраняет обновления в БД.
-    """
     result = {}
     async with SessionLocal() as s:
         for uid in user_ids:
             u = await s.get(User, uid)
             if u and u.first_name and u.first_name.strip():
-                result[uid] = u.first_name.strip()
-                continue
-            # Нет имени в БД — пробуем Telegram
+                result[uid] = u.first_name.strip(); continue
             try:
                 chat = await bot.get_chat(uid)
                 fn = (chat.first_name or "").strip()
                 un = (chat.username or "").strip()
-                if fn:
-                    result[uid] = fn
-                elif un:
-                    result[uid] = "@" + un
-                else:
-                    result[uid] = f"Игрок {uid}"
-                # Сохраняем в БД
+                if fn: result[uid] = fn
+                elif un: result[uid] = "@" + un
+                else: result[uid] = f"Игрок {uid}"
                 if u is None:
                     s.add(User(id=uid, first_name=fn or None, username=un or None))
                 else:
@@ -177,9 +166,11 @@ def enter_webapp_kb(tid, url):
                               web_app=WebAppInfo(url=f"{url}/?tid={tid}"))]])
 
 
-def manage_tournament_kb(tid, status):
+def manage_tournament_kb(tid, status, game_type=None):
     rows = [[InlineKeyboardButton(text="🎮 Открыть Mini App",
                                   web_app=WebAppInfo(url=f"{WEBAPP_URL}/?tid={tid}"))]]
+    if game_type == "wheel" and status in ("running", "paused"):
+        rows.append([InlineKeyboardButton(text="🎡 Крутить колесо", callback_data=f"tt_spin_{tid}")])
     if status == "registration":
         rows.append([InlineKeyboardButton(text="🖐 Вступить в турнир", callback_data=f"tt_join_{tid}")])
         rows.append([InlineKeyboardButton(text="▶️ Начать турнир", callback_data=f"tt_start_{tid}")])
@@ -326,15 +317,13 @@ async def txt_adm_owner(message: Message):
 async def txt_find_player(message: Message, state: FSMContext):
     if message.from_user.id != OWNER_ID:
         await message.answer("⛔ Только для владельца."); return
-    await state.clear()
-    await state.set_state(FindPlayerFSM.query)
+    await state.clear(); await state.set_state(FindPlayerFSM.query)
     await message.answer(
         f"<b>🔍 ПОИСК ИГРОКА</b>\n{SEP}\n"
         "Отправь <b>Telegram ID</b> или <b>@username</b> игрока.\n\n"
         "<blockquote>Чтобы выйти — нажми ⬅️ В главное меню.</blockquote>",
         reply_markup=ReplyKeyboardMarkup(
-            keyboard=[[KeyboardButton(text="⬅️ В главное меню")]],
-            resize_keyboard=True))
+            keyboard=[[KeyboardButton(text="⬅️ В главное меню")]], resize_keyboard=True))
 
 
 @router.message(FindPlayerFSM.query)
@@ -357,14 +346,10 @@ async def msg_find_player(message: Message, state: FSMContext):
             try: target_id = int(raw)
             except ValueError: target_id = None
         if target_id is None:
-            await message.answer(
-                "<blockquote>❌ Игрок не найден. Проверь ID/@username. "
-                "Он должен хотя бы раз запустить бота (/start).</blockquote>")
-            return
+            await message.answer("<blockquote>❌ Не найден.</blockquote>"); return
         u = await s.get(User, target_id)
         if not u:
-            await message.answer("<blockquote>❌ Игрок не найден в базе.</blockquote>")
-            return
+            await message.answer("<blockquote>❌ Нет в базе.</blockquote>"); return
         wins = (await s.execute(select(func.count()).select_from(Participant)
             .where(Participant.user_id == target_id,
                    Participant.status == "winner"))).scalar() or 0
@@ -382,29 +367,21 @@ async def msg_find_player(message: Message, state: FSMContext):
             t = await s.get(Tournament, p.tournament_id)
             if t and t.status in ("registration", "running", "paused"):
                 active_tours.append({"name": t.name, "status": t.status, "game": t.game_type})
-    if target_id == OWNER_ID:
-        role = "👑 Создатель"
-    elif is_adm_db:
-        role = "🛠 Администратор"
-    else:
-        role = "🎮 Игрок"
+    role = ("👑 Создатель" if target_id == OWNER_ID else
+            ("🛠 Администратор" if is_adm_db else "🎮 Игрок"))
     ban_label = "🚫 ЗАБАНЕН" if is_banned else "✅ Активен"
     uname = f"@{u.username}" if u.username else "—"
-    lines = [
-        "<b>🔍 ПРОФИЛЬ ИГРОКА</b>", SEP,
-        f"🆔 <b>ID:</b> <code>{target_id}</code>",
-        f"👤 <b>Имя:</b> {esc(u.first_name or '—')}",
-        f"🌐 <b>Username:</b> {uname}",
-        f"🎭 <b>Роль:</b> {role}",
-        f"📊 <b>Статус:</b> {ban_label}",
-        SEP,
-        f"🏆 <b>Побед:</b> <code>{wins}</code>",
-        f"🎮 <b>Участий:</b> <code>{total_participated}</code>",
-        f"📅 <b>В боте с:</b> {u.created_at:%d.%m.%Y}",
-    ]
+    lines = ["<b>🔍 ПРОФИЛЬ ИГРОКА</b>", SEP,
+             f"🆔 <b>ID:</b> <code>{target_id}</code>",
+             f"👤 <b>Имя:</b> {esc(u.first_name or '—')}",
+             f"🌐 <b>Username:</b> {uname}",
+             f"🎭 <b>Роль:</b> {role}",
+             f"📊 <b>Статус:</b> {ban_label}",
+             SEP, f"🏆 <b>Побед:</b> <code>{wins}</code>",
+             f"🎮 <b>Участий:</b> <code>{total_participated}</code>",
+             f"📅 <b>В боте с:</b> {u.created_at:%d.%m.%Y}"]
     if active_tours:
-        lines.append(SEP)
-        lines.append("<b>⚡ Активные турниры:</b>")
+        lines.append(SEP); lines.append("<b>⚡ Активные турниры:</b>")
         for t in active_tours:
             em = "🃏" if t["game"] == "poker" else "🎡"
             lines.append(f"  {em} {esc(t['name'])} · <code>{t['status']}</code>")
@@ -795,8 +772,9 @@ async def _show_tournament_menu(cb: CallbackQuery, tid: int):
             f"<b>Статус:</b> <code>{t.status}</code>\n"
             f"<b>Участников:</b> <code>{len(parts)}</code> / авто: <code>{t.min_players}</code>\n"
             f"<b>🎁 Приз:</b> <i>{esc(t.prize or '—')}</i>")
-    try: await cb.message.edit_text(text, reply_markup=manage_tournament_kb(t.id, t.status))
-    except: await cb.message.answer(text, reply_markup=manage_tournament_kb(t.id, t.status))
+    kb = manage_tournament_kb(t.id, t.status, t.game_type)
+    try: await cb.message.edit_text(text, reply_markup=kb)
+    except: await cb.message.answer(text, reply_markup=kb)
 
 
 async def _show_player_tournament_menu(cb: CallbackQuery, tid: int):
@@ -852,6 +830,24 @@ async def cb_player_view(cb: CallbackQuery):
     await _show_player_tournament_menu(cb, tid); await cb.answer()
 
 
+@router.callback_query(F.data.startswith("tt_spin_"))
+async def cb_spin_wheel(cb: CallbackQuery):
+    """Ручной запуск колеса из бота (только для админов/создателя)."""
+    if not await _is_admin(cb.from_user.id):
+        await cb.answer("Нет доступа", show_alert=True); return
+    tid = int(cb.data.split("_")[-1])
+    g = gm.get_wheel(tid)
+    if not g:
+        await cb.answer("Колесо не активно", show_alert=True); return
+    if g.finished:
+        await cb.answer("Турнир завершён", show_alert=True); return
+    if len(g.active) < 2:
+        await cb.answer("Мало игроков на колесе", show_alert=True); return
+    g.spin()
+    await gm.broadcast(tid, g.to_dict())
+    await cb.answer("🎡 Колесо крутится!")
+
+
 @router.callback_query(F.data.startswith("tt_join_"))
 async def cb_join_tournament(cb: CallbackQuery):
     tid = int(cb.data.split("_")[-1])
@@ -868,7 +864,6 @@ async def cb_join_tournament(cb: CallbackQuery):
         else:
             s.add(Participant(tournament_id=tid, user_id=cb.from_user.id,
                               status="approved", chips=t.start_stack))
-        # Обновим данные пользователя
         u = await s.get(User, cb.from_user.id)
         if u is None:
             s.add(User(id=cb.from_user.id, username=cb.from_user.username,
@@ -951,24 +946,19 @@ async def _start_tournament(bot, tid, notify=False):
         parts = r.scalars().all()
         if len(parts) < 2: return False
         uids = [p.user_id for p in parts]
-
-    # Обогащаем имена из Telegram (для тех, у кого нет данных в БД)
     names = await _enrich_names(bot, uids)
-
     async with SessionLocal() as s:
         t = await s.get(Tournament, tid)
         if not t: return False
         players = []
         for p in parts:
             players.append({"user_id": p.user_id, "name": names.get(p.user_id, f"Игрок {p.user_id}")})
-            # Обновим chips у Participant
             pp = await s.get(Participant, p.id)
             if pp: pp.chips = t.start_stack
         t.status = "running"; t.auto_start_at = None
         await s.commit()
         tname, tgame, tprize = t.name, t.game_type, t.prize
         tstack, tturn, tblind = t.start_stack, t.turn_time, t.blind_interval
-
     if tgame == "poker":
         g = PokerGame(tid, players, start_stack=tstack, turn_time=tturn, blind_interval=tblind)
         gm.set_poker(tid, g); g.start_hand()
@@ -1155,7 +1145,6 @@ async def cb_apply(cb: CallbackQuery):
     async with SessionLocal() as s:
         t = await s.get(Tournament, tid)
         if not t: await cb.answer("Нет", show_alert=True); return
-        # Обновляем User из Telegram
         u = await s.get(User, cb.from_user.id)
         if u is None:
             s.add(User(id=cb.from_user.id, username=cb.from_user.username,
@@ -1242,7 +1231,6 @@ async def cb_accept_inv(cb: CallbackQuery):
         p = r.scalar_one_or_none(); t = await s.get(Tournament, tid)
         if not p or not t: await cb.answer("Не найдено", show_alert=True); return
         p.status = "approved"
-        # Обновим данные юзера
         u = await s.get(User, cb.from_user.id)
         if u is None:
             s.add(User(id=cb.from_user.id, username=cb.from_user.username,
@@ -1312,20 +1300,16 @@ async def _finalize_tournament(bot, tid, winner_id=None, winner_name=None, manua
             if p: p.status = "winner"
         r = await s.execute(select(Participant).where(Participant.tournament_id == tid))
         parts = r.scalars().all()
-        total = len(parts)
-        user_ids = [p.user_id for p in parts]
+        total = len(parts); user_ids = [p.user_id for p in parts]
         await s.commit()
-
     try:
         await gm.broadcast(tid, {
             "type": "tournament_ended", "tid": tid,
             "winner_id": winner_id if not manual else None,
             "winner_name": winner_name if not manual else None,
-            "manual": manual,
-        })
+            "manual": manual})
     except Exception as e:
         logging.exception("broadcast final fail: %s", e)
-
     asyncio.create_task(_notify_tournament_ended(
         bot, tname, tprize, winner_id, winner_name, manual, user_ids, total))
 
@@ -1343,7 +1327,6 @@ async def game_ticker(bot):
                     if t.auto_start_at and t.auto_start_at <= now:
                         tid = t.id; break
             if tid: await _start_tournament(bot, tid, notify=True)
-
             for tid, g in list(gm._active_poker.items()):
                 if getattr(g, "finished", False):
                     if tid not in _finalized_tids:
@@ -1364,9 +1347,7 @@ async def game_ticker(bot):
                                 tb.start_hand(); changed = True
                         else:
                             tb._showdown_at = asyncio.get_event_loop().time()
-                if changed:
-                    await gm.broadcast(tid, g.to_dict())
-
+                if changed: await gm.broadcast(tid, g.to_dict())
             for tid, g in list(gm._active_wheel.items()):
                 if g.finished and tid not in _finalized_tids:
                     _finalized_tids.add(tid)
