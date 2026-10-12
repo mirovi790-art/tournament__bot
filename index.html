@@ -43,9 +43,8 @@ html,body{margin:0;padding:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe
 .room-title{font-family:Georgia,serif;font-size:24px;font-weight:900;letter-spacing:2px;background:linear-gradient(135deg,#fbbf24,#f59e0b,#fbbf24);-webkit-background-clip:text;background-clip:text;color:transparent;text-shadow:0 2px 10px rgba(251,191,36,.4);margin-bottom:10px;}
 .room-prize{display:inline-block;padding:10px 22px;border:3px solid #fbbf24;border-radius:14px;background:linear-gradient(135deg,rgba(251,191,36,.15),rgba(245,158,11,.05));color:#fbbf24;font-weight:900;font-size:15px;box-shadow:0 0 20px rgba(251,191,36,.3),inset 0 0 20px rgba(251,191,36,.1);}
 .counter-badge{display:inline-block;padding:6px 14px;background:#334155;border-radius:999px;font-size:13px;margin-top:8px;color:#cbd5e1;font-weight:700;}
-.wheel-wrap{padding:14px;display:flex;justify-content:center;}
+.wheel-stage{position:relative;display:flex;justify-content:center;align-items:center;padding:14px;}
 #wheel{width:90vw;max-width:460px;filter:drop-shadow(0 0 40px rgba(219,39,119,.5));}
-.wheel-stage{position:relative;display:flex;justify-content:center;align-items:center;}
 .pointer{position:absolute;top:-4px;left:50%;transform:translateX(-50%);font-size:40px;color:#fbbf24;text-shadow:0 4px 10px rgba(0,0,0,.9);z-index:3;}
 .spin-big{display:flex;justify-content:center;padding:8px 16px 16px;}
 .spin-big button{padding:18px 40px;border-radius:999px;border:none;background:linear-gradient(135deg,#db2777,#f59e0b);color:#fff;font-weight:900;font-size:18px;letter-spacing:2px;box-shadow:0 8px 24px rgba(219,39,119,.5);cursor:pointer;}
@@ -195,19 +194,20 @@ let WHEEL_LAST_SPIN_SHOWN = 0;
 let WHEEL_INITIAL_DONE = false;
 let AUTO_SPIN = false, AUTO_TIMER = null, EXIT_TIMER = null;
 let PENDING_ENDED = null;
+let SERVER_OFFSET = 0;  // server_now - Date.now()
 
 function show(el){el.classList.remove("hidden");}
 function hide(el){el.classList.add("hidden");}
 function setStatus(t,c){els.status.textContent=t; els.status.className="status "+(c||"");}
 function escapeHtml(s){return String(s||"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));}
 
-function stopAutoSpin(){
-  AUTO_SPIN = false;
-  if(AUTO_TIMER){ clearTimeout(AUTO_TIMER); AUTO_TIMER = null; }
+function stopAutoSpin(){ AUTO_SPIN = false; if(AUTO_TIMER){ clearTimeout(AUTO_TIMER); AUTO_TIMER = null; } }
+function clearExitTimer(){ if(EXIT_TIMER){ clearTimeout(EXIT_TIMER); EXIT_TIMER = null; } }
+
+function syncServerTime(s){
+  if(s && s.server_now){ SERVER_OFFSET = s.server_now - Date.now(); }
 }
-function clearExitTimer(){
-  if(EXIT_TIMER){ clearTimeout(EXIT_TIMER); EXIT_TIMER = null; }
-}
+function nowServer(){ return Date.now() + SERVER_OFFSET; }
 
 document.querySelectorAll(".tab").forEach(t => {
   t.addEventListener("click", () => {
@@ -333,8 +333,8 @@ function connectWS(tid){
   WS.onerror = () => setStatus("⚠ Ошибка","err");
   WS.onmessage = (ev) => {
     const msg = JSON.parse(ev.data);
-    if(msg.type === "poker_state") renderPoker(msg);
-    else if(msg.type === "wheel_state") renderWheel(msg);
+    if(msg.type === "poker_state"){ syncServerTime(msg); renderPoker(msg); }
+    else if(msg.type === "wheel_state"){ syncServerTime(msg); renderWheel(msg); }
     else if(msg.type === "spin_denied"){
       showModal("⛔ Нет доступа","Крутить колесо может только администратор турнира.",[]);
     }
@@ -350,9 +350,7 @@ function connectWS(tid){
       clearExitTimer();
       EXIT_TIMER = setTimeout(()=>exitRoom(), 5000);
     }
-    else if(msg.type === "tournament_ended"){
-      handleTournamentEnded(msg);
-    }
+    else if(msg.type === "tournament_ended"){ handleTournamentEnded(msg); }
     else if(msg.type === "tournament_cancelled"){
       stopAutoSpin();
       showModal("🛑 Отменён","Турнир отменён.",[]);
@@ -367,12 +365,8 @@ function connectWS(tid){
 }
 function wsSend(o){ if(WS && WS.readyState===1) WS.send(JSON.stringify(o)); }
 
-// ===== Обработка окончания турнира =====
 function handleTournamentEnded(msg){
-  if(GAME_TYPE === 'wheel' && WHEEL_LOCK){
-    PENDING_ENDED = msg;
-    return;
-  }
+  if(GAME_TYPE === 'wheel' && WHEEL_LOCK){ PENDING_ENDED = msg; return; }
   _showEndedModal(msg);
 }
 
@@ -541,10 +535,10 @@ function renderWheel(s){
 function updateWheelDOMOnly(s){
   els.rmCounter.textContent = `🎡 На колесе: ${(s.active||[]).length} игроков`;
   const plist = document.querySelector(".p-list");
+  const h3 = document.querySelector(".participants h3");
   if(!plist) return;
   const activeArr = s.active || [];
   const eliminatedArr = s.eliminated || [];
-  const h3 = document.querySelector(".participants h3");
   if(h3) h3.textContent = `👥 Участники (${activeArr.length + eliminatedArr.length})`;
   let html = "";
   activeArr.forEach(p => {
@@ -597,10 +591,7 @@ function drawWheelUI(s){
   if(spinBtn) spinBtn.addEventListener("click", () => {
     if(!IS_ADMIN){ showModal("⛔ Нет доступа","Крутить может только администратор",[]); return; }
     if(WHEEL_LOCK) return;
-    if(!AUTO_SPIN){
-      AUTO_SPIN = true;
-      wsSend({type:"spin"});
-    }
+    if(!AUTO_SPIN){ AUTO_SPIN = true; wsSend({type:"spin"}); }
   });
 }
 
@@ -618,7 +609,6 @@ function drawWheel(canvas, active){
     ctx.fillStyle="#94a3b8";ctx.font="bold 26px sans-serif";ctx.textAlign="center";ctx.textBaseline="middle";
     ctx.fillText("Ожидание",cx,cy);return;
   }
-  // рисуем сектора. Указатель в точке угла -π/2 (вверху).
   for(let i=0;i<n;i++){
     const a0=(i/n)*Math.PI*2-Math.PI/2+WHEEL_ANGLE;
     const a1=((i+1)/n)*Math.PI*2-Math.PI/2+WHEEL_ANGLE;
@@ -637,87 +627,102 @@ function drawWheel(canvas, active){
   ctx.fillText("🎡",cx,cy);
 }
 
+/**
+ * Синхронизированная анимация.
+ *  • Использует серверное время (started_at + duration) — все клиенты видят одну и ту же фазу.
+ *  • Начальная и конечная позиции ФИКСИРОВАНЫ — одинаковы у всех.
+ */
 function startSpinAnimation(s){
   WHEEL_LOCK = true;
   WHEEL_LAST_SPIN_SHOWN = s.spin_count;
 
-  // Восстанавливаем массив до выбывания
-  const activeWithElim = s.active.slice();
-  activeWithElim.splice(s.last_spin.sector_index, 0, s.last_spin.eliminated);
+  // Порядок секторов ДО выбывания — берём с сервера.
+  let activeWithElim;
+  if(s.last_spin.before_active){
+    activeWithElim = s.last_spin.before_active.map(p => ({...p}));
+  } else {
+    activeWithElim = s.active.slice();
+    activeWithElim.splice(s.last_spin.sector_index, 0, s.last_spin.eliminated);
+  }
 
   const canvas = document.getElementById("wheel");
   if(!canvas){ WHEEL_LOCK = false; return; }
 
   const n = activeWithElim.length;
   const idx = s.last_spin.sector_index;
-  const baseAngle = WHEEL_ANGLE;
 
-  // ВАЖНО: указатель сверху. Центр сектора idx должен оказаться в точке -π/2.
-  // Сектор i занимает [i/n*2π - π/2 + WA, (i+1)/n*2π - π/2 + WA].
-  // Центр сектора = (i+0.5)/n*2π - π/2 + WA.
-  // Приравниваем к -π/2 + 2π*k → WA = -(idx+0.5)/n*2π + 2π*k.
-  const targetBase = -(idx + 0.5) / n * Math.PI * 2;
-  let delta = (targetBase - baseAngle) % (Math.PI * 2);
-  if(delta < 0) delta += Math.PI * 2;
-  const turns = 6 + Math.random() * 2;
-  const target = baseAngle + turns * Math.PI * 2 + delta;
+  // Конечная позиция — детерминированная. Указатель на -π/2 (вверху).
+  // Центр сектора i: (i+0.5)/n*2π - π/2 + WA. Хотим центр idx в -π/2.
+  // WA_target = -(idx + 0.5)/n*2π + 2π*K, фиксируем K = 8.
+  const FINAL_TURNS = 8;
+  const target = -(idx + 0.5) / n * Math.PI * 2 + FINAL_TURNS * Math.PI * 2;
+  // Стартовая позиция — тоже фиксированная (целевая минус 8 оборотов).
+  const startAngle = target - Math.PI * 2 * 8;
 
-  const duration = 8000;
-  const start = performance.now();
-  const startA = WHEEL_ANGLE;
+  const duration = s.last_spin.duration || 8000;
+  const serverStart = s.last_spin.started_at || nowServer();
 
-  function frame(t){
-    const k = Math.min(1, (t - start) / duration);
+  function setPhase(force){
+    const el = nowServer() - serverStart;
+    const k = Math.min(1, Math.max(0, el / duration));
     const eased = 1 - Math.pow(1 - k, 4);
-    WHEEL_ANGLE = startA + (target - startA) * eased;
+    WHEEL_ANGLE = startAngle + (target - startAngle) * eased;
+    if(force){
+      const c = document.getElementById("wheel");
+      if(c) drawWheel(c, activeWithElim);
+    }
+    return k;
+  }
+
+  // Мгновенно ставим колесо в правильную фазу (важно при позднем подключении).
+  let k = setPhase(true);
+
+  // Уже прошло — показываем финальную позицию и сразу готовимся к обновлению.
+  if(k >= 1){
+    WHEEL_ANGLE = target;
     const c = document.getElementById("wheel");
     if(c) drawWheel(c, activeWithElim);
-    if(k < 1){
-      requestAnimationFrame(frame);
-    } else {
-      // Остановились. Указатель точно на центре сектора idx (выбывший).
+    setTimeout(() => {
+      hide(els.modal);
+      WHEEL_LOCK = false;
+      const finalState = WHEEL_NEXT || s;
+      WHEEL_NEXT = null;
+      updateWheelDOMOnly(finalState);
+      if(PENDING_ENDED){ const e = PENDING_ENDED; PENDING_ENDED = null; setTimeout(() => _showEndedModal(e), 500); return; }
+      if(finalState.finished){ stopAutoSpin(); return; }
+      if(AUTO_SPIN && (finalState.active||[]).length >= 2 && ACTIVE_TID && WS && WS.readyState === 1){
+        AUTO_TIMER = setTimeout(() => { if(AUTO_SPIN && WS.readyState === 1) wsSend({type:"spin"}); }, 7000);
+      } else stopAutoSpin();
+    }, 100);
+    return;
+  }
+
+  function frame(){
+    const kk = setPhase(false);
+    const c = document.getElementById("wheel");
+    if(c) drawWheel(c, activeWithElim);
+    if(kk < 1){ requestAnimationFrame(frame); }
+    else {
+      // Анимация закончилась — фиксируем угол и ждём 2.5 сек на модалке.
       WHEEL_ANGLE = target;
       const c2 = document.getElementById("wheel");
       if(c2) drawWheel(c2, activeWithElim);
 
-      // Модалка на 2.5 сек. Список и canvas НЕ трогаем.
       showModal("❌ Выбывает",
         `<b>${escapeHtml(s.last_spin.eliminated.name)}</b><br>покидает турнир!`, []);
 
       setTimeout(() => {
         hide(els.modal);
         WHEEL_LOCK = false;
-
-        // ВАЖНО: не перерисовываем canvas (указатель уже на выбывшем секторе,
-        // который сейчас исчезает из списка). Обновляем только список участников.
         const finalState = WHEEL_NEXT || s;
         WHEEL_NEXT = null;
         updateWheelDOMOnly(finalState);
 
-        // Отложенное окончание
-        if(PENDING_ENDED){
-          const ended = PENDING_ENDED;
-          PENDING_ENDED = null;
-          setTimeout(() => _showEndedModal(ended), 500);
-          return;
-        }
-
-        if(finalState.finished){
-          stopAutoSpin();
-          return;
-        }
-
-        // Авто-кручение через 7 сек
-        if(AUTO_SPIN && (finalState.active||[]).length >= 2
-           && ACTIVE_TID && WS && WS.readyState === 1){
-          AUTO_TIMER = setTimeout(() => {
-            if(AUTO_SPIN && ACTIVE_TID && WS && WS.readyState === 1){
-              wsSend({type:"spin"});
-            }
-          }, 7000);
-        } else {
-          stopAutoSpin();
-        }
+        if(PENDING_ENDED){ const e = PENDING_ENDED; PENDING_ENDED = null; setTimeout(() => _showEndedModal(e), 500); return; }
+        if(finalState.finished){ stopAutoSpin(); return; }
+        if(AUTO_SPIN && (finalState.active||[]).length >= 2 && ACTIVE_TID && WS && WS.readyState === 1){
+          AUTO_TIMER = setTimeout(() => { if(AUTO_SPIN && WS.readyState === 1) wsSend({type:"spin"}); }, 7000);
+        } else stopAutoSpin();
       }, 2500);
     }
   }
