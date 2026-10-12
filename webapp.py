@@ -16,6 +16,7 @@ from database import SessionLocal, User, Tournament, Participant, Ban, Admin
 import game as gm
 
 BOT_TOKEN = os.getenv("BOT_TOKEN", "")
+OWNER_ID = int(os.getenv("OWNER_ID", "0") or "0")
 HERE = os.path.dirname(os.path.abspath(__file__))
 
 
@@ -23,7 +24,6 @@ def _esc(s): return html.escape(s or "")
 
 
 def _display_name(u, uid):
-    """Имя: first_name → @username → Игрок #id."""
     if u:
         if u.first_name and u.first_name.strip(): return u.first_name.strip()
         if u.username and u.username.strip(): return "@" + u.username.strip()
@@ -31,14 +31,12 @@ def _display_name(u, uid):
 
 
 async def _enrich_names(bot, user_ids):
-    """Для uid без имени запрашивает Telegram и сохраняет в БД."""
     result = {}
     async with SessionLocal() as s:
         for uid in user_ids:
             u = await s.get(User, uid)
             if u and u.first_name and u.first_name.strip():
-                result[uid] = u.first_name.strip()
-                continue
+                result[uid] = u.first_name.strip(); continue
             try:
                 chat = await bot.get_chat(uid)
                 fn = (chat.first_name or "").strip()
@@ -85,7 +83,6 @@ async def _waiting_state(bot, tid, t, user_id):
             Participant.status.in_(("approved", "winner"))))
         parts = r.scalars().all()
         uids = [p.user_id for p in parts]
-    # Обогащаем имена
     names = await _enrich_names(bot, uids)
     players_info = [{"user_id": uid, "name": names.get(uid, f"Игрок {uid}")} for uid in uids]
 
@@ -125,6 +122,7 @@ def create_app(bot):
         u_obj = parsed.get("user_obj", {})
         user_id = u_obj.get("id")
         if not user_id: raise HTTPException(status_code=401, detail="No user")
+        is_owner = (OWNER_ID and user_id == OWNER_ID)
         async with SessionLocal() as s:
             if await s.get(Ban, user_id):
                 raise HTTPException(status_code=403, detail="Banned")
@@ -140,20 +138,49 @@ def create_app(bot):
             wins = (await s.execute(select(func.count()).select_from(Participant)
                 .where(Participant.user_id == user_id,
                        Participant.status == "winner"))).scalar() or 0
-            is_admin = (await s.execute(select(Admin).where(
+            is_admin_db = (await s.execute(select(Admin).where(
                 Admin.user_id == user_id))).scalar_one_or_none() is not None
+            is_admin = is_admin_db or is_owner
+
+            seen_tids = set()
+            my_tours = []
+
+            # 1. Турниры, где я участник
             r = await s.execute(select(Participant).where(
                 Participant.user_id == user_id,
                 Participant.status.in_(("approved", "winner"))))
-            parts = r.scalars().all()
-            my_tours = []
-            for p in parts:
+            for p in r.scalars().all():
                 t = await s.get(Tournament, p.tournament_id)
-                if not t: continue
+                if not t or t.id in seen_tids: continue
                 if t.status in ("finished", "cancelled"): continue
+                seen_tids.add(t.id)
                 my_tours.append({"tid": t.id, "name": t.name, "status": t.status,
                                  "game_type": t.game_type, "my_status": p.status,
                                  "prize": t.prize or ""})
+
+            # 2. Турниры, где я создатель (даже если не участник)
+            r = await s.execute(select(Tournament).where(
+                Tournament.creator_id == user_id,
+                Tournament.status.in_(("registration", "running", "paused"))))
+            for t in r.scalars().all():
+                if t.id in seen_tids: continue
+                seen_tids.add(t.id)
+                my_tours.append({"tid": t.id, "name": t.name, "status": t.status,
+                                 "game_type": t.game_type, "my_status": "creator",
+                                 "prize": t.prize or ""})
+
+            # 3. Если админ/владелец — все активные колёса для прокрута
+            if is_admin:
+                r = await s.execute(select(Tournament).where(
+                    Tournament.game_type == "wheel",
+                    Tournament.status.in_(("running", "paused"))))
+                for t in r.scalars().all():
+                    if t.id in seen_tids: continue
+                    seen_tids.add(t.id)
+                    my_tours.append({"tid": t.id, "name": t.name, "status": t.status,
+                                     "game_type": t.game_type, "my_status": "admin",
+                                     "prize": t.prize or ""})
+
         return {"user_id": user_id, "username": u_obj.get("username"),
                 "first_name": u_obj.get("first_name"),
                 "wins": wins, "is_admin": is_admin, "tournaments": my_tours}
