@@ -7,7 +7,7 @@
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
 <style>
 *{box-sizing:border-box;}
-html,body{margin:0;padding:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;background:#0f172a;color:#f1f5f9;min-height:100vh;user-select:none;overflow-x:hidden;}
+html,body{margin:0;padding:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;background:#0a0e1a;color:#f1f5f9;min-height:100vh;user-select:none;overflow-x:hidden;}
 #app{display:flex;flex-direction:column;min-height:100vh;}
 #topbar{display:flex;justify-content:space-between;align-items:center;padding:10px 12px;background:linear-gradient(135deg,#1e40af,#7c3aed);border-bottom:2px solid #a78bfa;position:sticky;top:0;z-index:20;gap:6px;flex-wrap:wrap;}
 #title{font-weight:800;font-size:14px;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
@@ -40,24 +40,125 @@ html,body{margin:0;padding:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe
 .tr-card .btn-start:disabled{background:#475569;box-shadow:none;}
 .empty{padding:40px 20px;text-align:center;color:#94a3b8;}
 .room-head{padding:16px 14px 8px;text-align:center;}
-.room-title{font-family:Georgia,serif;font-size:24px;font-weight:900;letter-spacing:2px;background:linear-gradient(135deg,#fbbf24,#f59e0b,#fbbf24);-webkit-background-clip:text;background-clip:text;color:transparent;text-shadow:0 2px 10px rgba(251,191,36,.4);margin-bottom:10px;}
-.room-prize{display:inline-block;padding:10px 22px;border:3px solid #fbbf24;border-radius:14px;background:linear-gradient(135deg,rgba(251,191,36,.15),rgba(245,158,11,.05));color:#fbbf24;font-weight:900;font-size:15px;box-shadow:0 0 20px rgba(251,191,36,.3),inset 0 0 20px rgba(251,191,36,.1);}
+.room-title{font-family:Georgia,serif;font-size:26px;font-weight:900;letter-spacing:3px;background:linear-gradient(135deg,#fbbf24,#f59e0b,#fbbf24);-webkit-background-clip:text;background-clip:text;color:transparent;margin-bottom:10px;text-shadow:0 0 30px rgba(251,191,36,.5);}
+.room-prize{display:inline-block;padding:10px 24px;border:3px solid #fbbf24;border-radius:14px;background:linear-gradient(135deg,rgba(251,191,36,.15),rgba(245,158,11,.05));color:#fbbf24;font-weight:900;font-size:15px;box-shadow:0 0 20px rgba(251,191,36,.4),inset 0 0 20px rgba(251,191,36,.1);}
 .counter-badge{display:inline-block;padding:6px 14px;background:#334155;border-radius:999px;font-size:13px;margin-top:8px;color:#cbd5e1;font-weight:700;}
-.wheel-stage{position:relative;display:flex;justify-content:center;align-items:center;padding:14px;}
-#wheel{width:90vw;max-width:460px;filter:drop-shadow(0 0 40px rgba(219,39,119,.5));}
-.pointer{position:absolute;top:-4px;left:50%;transform:translateX(-50%);font-size:40px;color:#fbbf24;text-shadow:0 4px 10px rgba(0,0,0,.9);z-index:3;}
+
+/* ===================== НЕОНОВОЕ КОЛЕСО ===================== */
+.wheel-stage{
+  position:relative;
+  display:flex;justify-content:center;align-items:center;
+  padding:32px 14px 14px;
+  perspective:1000px;
+}
+.wheel-stage::before{
+  content:'';position:absolute;inset:0;
+  background:radial-gradient(circle at 50% 45%,rgba(219,39,119,.25) 0%,transparent 60%),
+             radial-gradient(circle at 50% 45%,rgba(124,58,237,.2) 0%,transparent 70%);
+  pointer-events:none;
+  animation:wheelPulse 3s ease-in-out infinite;
+}
+@keyframes wheelPulse{
+  0%,100%{opacity:.7;transform:scale(1);}
+  50%{opacity:1;transform:scale(1.03);}
+}
+#wheel{
+  position:relative;z-index:2;
+  width:90vw;max-width:480px;
+  filter:drop-shadow(0 0 30px rgba(219,39,119,.6)) drop-shadow(0 0 60px rgba(124,58,237,.4));
+  animation:wheelGlow 4s ease-in-out infinite;
+}
+@keyframes wheelGlow{
+  0%,100%{filter:drop-shadow(0 0 30px rgba(219,39,119,.6)) drop-shadow(0 0 60px rgba(124,58,237,.4));}
+  50%{filter:drop-shadow(0 0 40px rgba(219,39,119,.9)) drop-shadow(0 0 80px rgba(124,58,237,.7));}
+}
+.pointer{
+  position:absolute;top:12px;left:50%;transform:translateX(-50%);
+  font-size:0;z-index:5;
+  filter:drop-shadow(0 0 12px #fbbf24) drop-shadow(0 0 24px rgba(251,191,36,.7));
+  animation:pointerBob 1.2s ease-in-out infinite;
+}
+.pointer::before{
+  content:'';
+  display:block;width:0;height:0;
+  border-left:22px solid transparent;
+  border-right:22px solid transparent;
+  border-top:36px solid #fbbf24;
+  filter:drop-shadow(0 3px 8px rgba(0,0,0,.9));
+}
+.pointer::after{
+  content:'';
+  position:absolute;top:-6px;left:50%;transform:translateX(-50%);
+  width:14px;height:14px;border-radius:50%;
+  background:radial-gradient(circle,#fff 0%,#fbbf24 60%,#f59e0b 100%);
+  box-shadow:0 0 14px #fbbf24,0 0 28px #f59e0b;
+}
+@keyframes pointerBob{
+  0%,100%{transform:translateX(-50%) translateY(0);}
+  50%{transform:translateX(-50%) translateY(3px);}
+}
 .spin-big{display:flex;justify-content:center;padding:8px 16px 16px;}
-.spin-big button{padding:18px 40px;border-radius:999px;border:none;background:linear-gradient(135deg,#db2777,#f59e0b);color:#fff;font-weight:900;font-size:18px;letter-spacing:2px;box-shadow:0 8px 24px rgba(219,39,119,.5);cursor:pointer;}
-.spin-big button:disabled{background:#475569;box-shadow:none;}
-.participants{margin:0 14px 20px;background:#1e293b;border-radius:14px;padding:14px;border:1px solid #334155;}
-.participants h3{margin:0 0 10px;font-size:14px;color:#fbbf24;font-weight:800;}
+.spin-big button{
+  position:relative;
+  padding:18px 44px;border-radius:999px;border:2px solid rgba(255,255,255,.3);
+  background:linear-gradient(135deg,#db2777,#a855f7,#f59e0b);
+  background-size:200% 200%;
+  color:#fff;font-weight:900;font-size:18px;letter-spacing:2px;
+  cursor:pointer;
+  box-shadow:0 0 24px rgba(219,39,119,.7),0 0 48px rgba(168,85,247,.5),0 8px 24px rgba(0,0,0,.5);
+  animation:spinBtnShift 3s ease infinite;
+  transition:transform .15s,box-shadow .3s;
+}
+.spin-big button:hover:not(:disabled){
+  transform:translateY(-2px);
+  box-shadow:0 0 32px rgba(219,39,119,.9),0 0 64px rgba(168,85,247,.7),0 12px 28px rgba(0,0,0,.6);
+}
+.spin-big button:active:not(:disabled){transform:translateY(0) scale(.97);}
+.spin-big button:disabled{
+  background:#334155;border-color:#475569;box-shadow:none;animation:none;
+  color:#94a3b8;
+}
+@keyframes spinBtnShift{
+  0%,100%{background-position:0% 50%;}
+  50%{background-position:100% 50%;}
+}
+.participants{
+  margin:0 14px 20px;
+  background:linear-gradient(135deg,#0f172a,#1e293b);
+  border-radius:14px;padding:14px;
+  border:1px solid rgba(124,58,237,.4);
+  box-shadow:0 0 20px rgba(124,58,237,.2),inset 0 0 20px rgba(124,58,237,.05);
+}
+.participants h3{
+  margin:0 0 10px;font-size:14px;font-weight:800;
+  background:linear-gradient(135deg,#fbbf24,#f59e0b);
+  -webkit-background-clip:text;background-clip:text;color:transparent;
+  letter-spacing:1px;
+}
 .p-list{max-height:280px;overflow-y:auto;display:flex;flex-direction:column;gap:4px;}
 .p-list::-webkit-scrollbar{width:6px;}
 .p-list::-webkit-scrollbar-track{background:#0f172a;border-radius:3px;}
-.p-list::-webkit-scrollbar-thumb{background:#475569;border-radius:3px;}
-.p-row{display:flex;justify-content:space-between;padding:8px 12px;background:#0f172a;border-radius:8px;font-size:13px;}
-.p-row.elim{color:#fca5a5;text-decoration:line-through;opacity:.7;}
-.p-row.win{color:#86efac;font-weight:800;}
+.p-list::-webkit-scrollbar-thumb{background:linear-gradient(135deg,#7c3aed,#db2777);border-radius:3px;}
+.p-row{
+  display:flex;justify-content:space-between;padding:10px 14px;
+  background:rgba(15,23,42,.7);border-radius:8px;font-size:13px;
+  border-left:3px solid #22c55e;
+  transition:all .2s;
+}
+.p-row:hover{background:rgba(15,23,42,.95);transform:translateX(2px);}
+.p-row.elim{
+  color:#fca5a5;opacity:.6;
+  border-left-color:#dc2626;
+  text-decoration:line-through;
+}
+.p-row.win{
+  color:#fef3c7;font-weight:800;
+  border-left-color:#fbbf24;
+  background:linear-gradient(90deg,rgba(251,191,36,.2),rgba(15,23,42,.7));
+  box-shadow:0 0 12px rgba(251,191,36,.4);
+}
+
+/* ===================== POKER ===================== */
 .table-wrap{padding:8px;display:flex;justify-content:center;align-items:center;}
 .table-felt{position:relative;width:100%;max-width:520px;aspect-ratio:4/5;border-radius:50%/40%;background:radial-gradient(ellipse at center,#16a34a 0%,#065f46 100%);border:10px solid #b45309;box-shadow:inset 0 0 80px rgba(0,0,0,.3),0 0 40px rgba(251,191,36,.3);display:flex;align-items:center;justify-content:center;}
 .pot{position:absolute;top:6%;left:50%;transform:translateX(-50%);background:linear-gradient(135deg,#facc15,#f59e0b);padding:8px 20px;border-radius:999px;font-weight:900;color:#422006;font-size:15px;box-shadow:0 4px 12px rgba(0,0,0,.5);}
@@ -194,7 +295,7 @@ let WHEEL_LAST_SPIN_SHOWN = 0;
 let WHEEL_INITIAL_DONE = false;
 let AUTO_SPIN = false, AUTO_TIMER = null, EXIT_TIMER = null;
 let PENDING_ENDED = null;
-let SERVER_OFFSET = 0;  // server_now - Date.now()
+let SERVER_OFFSET = 0;
 
 function show(el){el.classList.remove("hidden");}
 function hide(el){el.classList.add("hidden");}
@@ -203,10 +304,7 @@ function escapeHtml(s){return String(s||"").replace(/[&<>"']/g,c=>({"&":"&amp;",
 
 function stopAutoSpin(){ AUTO_SPIN = false; if(AUTO_TIMER){ clearTimeout(AUTO_TIMER); AUTO_TIMER = null; } }
 function clearExitTimer(){ if(EXIT_TIMER){ clearTimeout(EXIT_TIMER); EXIT_TIMER = null; } }
-
-function syncServerTime(s){
-  if(s && s.server_now){ SERVER_OFFSET = s.server_now - Date.now(); }
-}
+function syncServerTime(s){ if(s && s.server_now){ SERVER_OFFSET = s.server_now - Date.now(); } }
 function nowServer(){ return Date.now() + SERVER_OFFSET; }
 
 document.querySelectorAll(".tab").forEach(t => {
@@ -257,6 +355,9 @@ async function loadTournaments(){
       const canStart = t.status === "running" || t.status === "paused";
       const card = document.createElement("div");
       card.className = "tr-card";
+      let badge = "";
+      if(t.my_status === "admin") badge = '<span style="color:#f59e0b;font-weight:800;font-size:11px;">👑 АДМИН</span>';
+      else if(t.my_status === "creator") badge = '<span style="color:#a78bfa;font-weight:800;font-size:11px;">🎨 СОЗДАТЕЛЬ</span>';
       card.innerHTML = `
         <div class="hdr">
           <div class="name">${escapeHtml(t.name)}</div>
@@ -265,6 +366,7 @@ async function loadTournaments(){
         <div class="meta">
           <span>Игра: <b>${gameName}</b></span>
           <span>Статус: <b>${t.status}</b></span>
+          ${badge}
         </div>
         ${t.prize ? `<div class="meta">🎁 Приз: <b>${escapeHtml(t.prize)}</b></div>` : ""}
         <button class="btn-start" ${canStart?"":"disabled"}>${canStart ? "🎮 НАЧАТЬ" : (t.status==="registration" ? "⏳ Ожидание старта" : "🏁 Завершён")}</button>
@@ -514,21 +616,17 @@ function makeCard(c){
 // ===== WHEEL =====
 function renderWheel(s){
   LAST_STATE = s;
-
   if(WHEEL_LOCK){ WHEEL_NEXT = s; return; }
-
   if(!WHEEL_INITIAL_DONE){
     WHEEL_INITIAL_DONE = true;
     WHEEL_LAST_SPIN_SHOWN = s.spin_count;
     drawWheelUI(s);
     return;
   }
-
   if(s.spin_count > WHEEL_LAST_SPIN_SHOWN && s.last_spin){
     startSpinAnimation(s);
     return;
   }
-
   drawWheelUI(s);
 }
 
@@ -554,9 +652,7 @@ function updateWheelDOMOnly(s){
 function drawWheelUI(s){
   const activeArr = s.active || [];
   const eliminatedArr = s.eliminated || [];
-
   els.rmCounter.textContent = `🎡 На колесе: ${activeArr.length} игроков`;
-
   const canSpin = IS_ADMIN && !s.finished && activeArr.length >= 2;
   let btnHTML = "";
   if(IS_ADMIN){
@@ -564,10 +660,9 @@ function drawWheelUI(s){
   } else {
     btnHTML = `<button id="spin-btn" disabled>🎡 Крутит администратор</button>`;
   }
-
   let html = `
     <div class="wheel-stage">
-      <div class="pointer">▼</div>
+      <div class="pointer"></div>
       <canvas id="wheel" width="640" height="640"></canvas>
     </div>
     <div class="spin-big">${btnHTML}</div>
@@ -584,7 +679,6 @@ function drawWheelUI(s){
   });
   html += `</div></div>`;
   els.roomContent.innerHTML = html;
-
   const canvas = document.getElementById("wheel");
   const spinBtn = document.getElementById("spin-btn");
   drawWheel(canvas, activeArr);
@@ -595,48 +689,177 @@ function drawWheelUI(s){
   });
 }
 
+/* =================== НЕОНОВОЕ КОЛЕСО =================== */
+const NEON_PALETTE = [
+  {fill:["#ff1e56","#a41035"], glow:"#ff1e56"},
+  {fill:["#00c9ff","#005b8f"], glow:"#00c9ff"},
+  {fill:["#b026ff","#5a0f8a"], glow:"#b026ff"},
+  {fill:["#ffb600","#a06a00"], glow:"#ffb600"},
+  {fill:["#00ff9d","#007a4a"], glow:"#00ff9d"},
+  {fill:["#ff6b00","#a13800"], glow:"#ff6b00"},
+  {fill:["#ff00e5","#8c0077"], glow:"#ff00e5"},
+  {fill:["#7cff00","#3d8a00"], glow:"#7cff00"},
+  {fill:["#00e5ff","#006b8f"], glow:"#00e5ff"},
+  {fill:["#f959ff","#8a1e99"], glow:"#f959ff"},
+  {fill:["#ffd400","#8a6f00"], glow:"#ffd400"},
+  {fill:["#5cff9d","#1e8a52"], glow:"#5cff9d"},
+];
+
 function drawWheel(canvas, active){
   if(!canvas) return;
   const ctx = canvas.getContext("2d");
   const W = canvas.width, H = canvas.height;
-  const cx = W/2, cy = H/2, r = Math.min(W,H)/2 - 20;
+  const cx = W/2, cy = H/2, r = Math.min(W,H)/2 - 30;
   ctx.clearRect(0,0,W,H);
-  const palette = ["#ef4444","#f59e0b","#10b981","#3b82f6","#8b5cf6","#ec4899","#14b8a6","#f43f5e","#84cc16","#06b6d4","#f97316","#a855f7"];
-  const n = Math.max(active.length,1);
+
+  // Внешнее неоновое кольцо (подготовительный halo)
+  const haloGrad = ctx.createRadialGradient(cx, cy, r*0.6, cx, cy, r+30);
+  haloGrad.addColorStop(0, "rgba(219,39,119,0)");
+  haloGrad.addColorStop(0.7, "rgba(219,39,119,0.15)");
+  haloGrad.addColorStop(1, "rgba(219,39,119,0)");
+  ctx.fillStyle = haloGrad;
+  ctx.beginPath(); ctx.arc(cx, cy, r+30, 0, Math.PI*2); ctx.fill();
+
+  const n = Math.max(active.length, 1);
+
   if(active.length === 0){
-    ctx.beginPath();ctx.arc(cx,cy,r,0,Math.PI*2);ctx.fillStyle="#1e293b";ctx.fill();
-    ctx.strokeStyle="#334155";ctx.lineWidth=4;ctx.stroke();
-    ctx.fillStyle="#94a3b8";ctx.font="bold 26px sans-serif";ctx.textAlign="center";ctx.textBaseline="middle";
-    ctx.fillText("Ожидание",cx,cy);return;
+    // Пустое колесо
+    ctx.beginPath(); ctx.arc(cx,cy,r,0,Math.PI*2);
+    const emptyGrad = ctx.createRadialGradient(cx,cy,r*0.3,cx,cy,r);
+    emptyGrad.addColorStop(0,"#1e293b");
+    emptyGrad.addColorStop(1,"#0a0e1a");
+    ctx.fillStyle = emptyGrad; ctx.fill();
+    ctx.strokeStyle = "rgba(124,58,237,.6)"; ctx.lineWidth = 3;
+    ctx.shadowColor = "#7c3aed"; ctx.shadowBlur = 30;
+    ctx.stroke();
+    ctx.shadowBlur = 0;
+    ctx.fillStyle = "#64748b"; ctx.font = "bold 26px sans-serif";
+    ctx.textAlign = "center"; ctx.textBaseline = "middle";
+    ctx.fillText("Ожидание", cx, cy);
+    drawHub(ctx, cx, cy);
+    return;
   }
-  for(let i=0;i<n;i++){
-    const a0=(i/n)*Math.PI*2-Math.PI/2+WHEEL_ANGLE;
-    const a1=((i+1)/n)*Math.PI*2-Math.PI/2+WHEEL_ANGLE;
-    ctx.beginPath();ctx.moveTo(cx,cy);ctx.arc(cx,cy,r,a0,a1);ctx.closePath();
-    ctx.fillStyle=palette[i%palette.length];ctx.fill();
-    ctx.strokeStyle="#0f172a";ctx.lineWidth=2;ctx.stroke();
-    const mid=(a0+a1)/2;
-    ctx.save();ctx.translate(cx,cy);ctx.rotate(mid);ctx.textAlign="right";
-    ctx.fillStyle="#fff";ctx.font="bold 18px sans-serif";
+
+  // Рисуем сектора
+  for(let i = 0; i < n; i++){
+    const a0 = (i/n)*Math.PI*2 - Math.PI/2 + WHEEL_ANGLE;
+    const a1 = ((i+1)/n)*Math.PI*2 - Math.PI/2 + WHEEL_ANGLE;
+    const col = NEON_PALETTE[i % NEON_PALETTE.length];
+
+    // Градиент сектора: от центра к краю
+    const grad = ctx.createRadialGradient(cx, cy, r*0.2, cx, cy, r);
+    grad.addColorStop(0, col.fill[0]);
+    grad.addColorStop(1, col.fill[1]);
+
+    ctx.beginPath();
+    ctx.moveTo(cx, cy);
+    ctx.arc(cx, cy, r, a0, a1);
+    ctx.closePath();
+    ctx.fillStyle = grad;
+    ctx.fill();
+
+    // Разделитель между секторами — тёмная линия + неоновый край
+    ctx.save();
+    ctx.strokeStyle = col.glow;
+    ctx.lineWidth = 3;
+    ctx.shadowColor = col.glow;
+    ctx.shadowBlur = 12;
+    ctx.beginPath();
+    ctx.moveTo(cx, cy);
+    ctx.lineTo(cx + r*Math.cos(a0), cy + r*Math.sin(a0));
+    ctx.stroke();
+    ctx.restore();
+
+    // Текст сектора
+    const mid = (a0 + a1) / 2;
+    ctx.save();
+    ctx.translate(cx, cy);
+    ctx.rotate(mid);
+    ctx.textAlign = "right";
+    ctx.textBaseline = "middle";
+    // тень текста
+    ctx.shadowColor = "rgba(0,0,0,.9)";
+    ctx.shadowBlur = 6;
+    ctx.shadowOffsetX = 2;
+    ctx.shadowOffsetY = 2;
+    ctx.fillStyle = "#ffffff";
+    ctx.font = "bold 20px 'Segoe UI',sans-serif";
     const label = active[i].name || "";
-    ctx.fillText(label.length>14?label.slice(0,14)+"…":label,r-14,7);ctx.restore();
+    const txt = label.length > 14 ? label.slice(0,14)+"…" : label;
+    ctx.fillText(txt, r - 18, 0);
+    ctx.restore();
   }
-  ctx.beginPath();ctx.arc(cx,cy,50,0,Math.PI*2);ctx.fillStyle="#0f172a";ctx.fill();
-  ctx.strokeStyle="#fbbf24";ctx.lineWidth=5;ctx.stroke();
-  ctx.fillStyle="#fbbf24";ctx.font="bold 28px sans-serif";ctx.textAlign="center";ctx.textBaseline="middle";
-  ctx.fillText("🎡",cx,cy);
+
+  // Внешний неоновый обод
+  ctx.save();
+  ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI*2);
+  ctx.strokeStyle = "#a78bfa";
+  ctx.lineWidth = 6;
+  ctx.shadowColor = "#a78bfa";
+  ctx.shadowBlur = 25;
+  ctx.stroke();
+  ctx.restore();
+
+  ctx.save();
+  ctx.beginPath(); ctx.arc(cx, cy, r-4, 0, Math.PI*2);
+  ctx.strokeStyle = "#db2777";
+  ctx.lineWidth = 2;
+  ctx.shadowColor = "#db2777";
+  ctx.shadowBlur = 15;
+  ctx.stroke();
+  ctx.restore();
+
+  // Внутренний обод перед хабом
+  ctx.save();
+  ctx.beginPath(); ctx.arc(cx, cy, 78, 0, Math.PI*2);
+  ctx.strokeStyle = "#fbbf24";
+  ctx.lineWidth = 3;
+  ctx.shadowColor = "#fbbf24";
+  ctx.shadowBlur = 20;
+  ctx.stroke();
+  ctx.restore();
+
+  drawHub(ctx, cx, cy);
 }
 
-/**
- * Синхронизированная анимация.
- *  • Использует серверное время (started_at + duration) — все клиенты видят одну и ту же фазу.
- *  • Начальная и конечная позиции ФИКСИРОВАНЫ — одинаковы у всех.
- */
+function drawHub(ctx, cx, cy){
+  // Внешний круг хаба
+  ctx.save();
+  ctx.beginPath(); ctx.arc(cx, cy, 58, 0, Math.PI*2);
+  const hubGrad = ctx.createRadialGradient(cx, cy, 5, cx, cy, 58);
+  hubGrad.addColorStop(0, "#1e293b");
+  hubGrad.addColorStop(1, "#0a0e1a");
+  ctx.fillStyle = hubGrad;
+  ctx.shadowColor = "#7c3aed";
+  ctx.shadowBlur = 30;
+  ctx.fill();
+  ctx.restore();
+
+  // Кайма хаба
+  ctx.save();
+  ctx.beginPath(); ctx.arc(cx, cy, 58, 0, Math.PI*2);
+  ctx.strokeStyle = "#fbbf24";
+  ctx.lineWidth = 4;
+  ctx.shadowColor = "#fbbf24";
+  ctx.shadowBlur = 20;
+  ctx.stroke();
+  ctx.restore();
+
+  // Иконка в центре
+  ctx.save();
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.font = "36px sans-serif";
+  ctx.shadowColor = "#fbbf24";
+  ctx.shadowBlur = 20;
+  ctx.fillText("🎡", cx, cy);
+  ctx.restore();
+}
+
 function startSpinAnimation(s){
   WHEEL_LOCK = true;
   WHEEL_LAST_SPIN_SHOWN = s.spin_count;
 
-  // Порядок секторов ДО выбывания — берём с сервера.
   let activeWithElim;
   if(s.last_spin.before_active){
     activeWithElim = s.last_spin.before_active.map(p => ({...p}));
@@ -651,12 +874,8 @@ function startSpinAnimation(s){
   const n = activeWithElim.length;
   const idx = s.last_spin.sector_index;
 
-  // Конечная позиция — детерминированная. Указатель на -π/2 (вверху).
-  // Центр сектора i: (i+0.5)/n*2π - π/2 + WA. Хотим центр idx в -π/2.
-  // WA_target = -(idx + 0.5)/n*2π + 2π*K, фиксируем K = 8.
   const FINAL_TURNS = 8;
   const target = -(idx + 0.5) / n * Math.PI * 2 + FINAL_TURNS * Math.PI * 2;
-  // Стартовая позиция — тоже фиксированная (целевая минус 8 оборотов).
   const startAngle = target - Math.PI * 2 * 8;
 
   const duration = s.last_spin.duration || 8000;
@@ -674,10 +893,8 @@ function startSpinAnimation(s){
     return k;
   }
 
-  // Мгновенно ставим колесо в правильную фазу (важно при позднем подключении).
   let k = setPhase(true);
 
-  // Уже прошло — показываем финальную позицию и сразу готовимся к обновлению.
   if(k >= 1){
     WHEEL_ANGLE = target;
     const c = document.getElementById("wheel");
@@ -703,21 +920,17 @@ function startSpinAnimation(s){
     if(c) drawWheel(c, activeWithElim);
     if(kk < 1){ requestAnimationFrame(frame); }
     else {
-      // Анимация закончилась — фиксируем угол и ждём 2.5 сек на модалке.
       WHEEL_ANGLE = target;
       const c2 = document.getElementById("wheel");
       if(c2) drawWheel(c2, activeWithElim);
-
       showModal("❌ Выбывает",
         `<b>${escapeHtml(s.last_spin.eliminated.name)}</b><br>покидает турнир!`, []);
-
       setTimeout(() => {
         hide(els.modal);
         WHEEL_LOCK = false;
         const finalState = WHEEL_NEXT || s;
         WHEEL_NEXT = null;
         updateWheelDOMOnly(finalState);
-
         if(PENDING_ENDED){ const e = PENDING_ENDED; PENDING_ENDED = null; setTimeout(() => _showEndedModal(e), 500); return; }
         if(finalState.finished){ stopAutoSpin(); return; }
         if(AUTO_SPIN && (finalState.active||[]).length >= 2 && ACTIVE_TID && WS && WS.readyState === 1){
