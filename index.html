@@ -1,0 +1,645 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+<title>Турнир · Mini App</title>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<style>
+*{box-sizing:border-box;}
+html,body{margin:0;padding:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;background:#0f172a;color:#f1f5f9;min-height:100vh;user-select:none;overflow-x:hidden;}
+#app{display:flex;flex-direction:column;min-height:100vh;}
+#topbar{display:flex;justify-content:space-between;align-items:center;padding:10px 12px;background:linear-gradient(135deg,#1e40af,#7c3aed);border-bottom:2px solid #a78bfa;position:sticky;top:0;z-index:20;gap:6px;flex-wrap:wrap;}
+#title{font-weight:800;font-size:14px;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.status{font-size:10px;padding:4px 8px;border-radius:999px;background:rgba(255,255,255,.2);color:#fff;}
+.status.ok{background:#16a34a;}
+.status.err{background:#dc2626;}
+.btn-leave{background:#b91c1c;color:#fff;border:none;padding:6px 10px;border-radius:8px;font-size:11px;font-weight:700;cursor:pointer;}
+.btn-admin{background:#ea580c;color:#fff;border:none;padding:6px 9px;border-radius:8px;font-size:11px;font-weight:700;cursor:pointer;margin-right:3px;}
+.view{flex:1;display:flex;flex-direction:column;}
+.hidden{display:none!important;}
+.tabs{display:flex;background:#1e293b;border-bottom:2px solid #334155;}
+.tab{flex:1;padding:14px;text-align:center;font-weight:800;font-size:14px;color:#94a3b8;cursor:pointer;transition:.2s;}
+.tab.active{color:#fbbf24;border-bottom:3px solid #fbbf24;background:#0f172a;}
+.pf-wrap{padding:16px;}
+.pf-card{background:linear-gradient(135deg,#1e40af,#7c3aed);border-radius:18px;padding:22px;text-align:center;box-shadow:0 6px 24px rgba(124,58,237,.4);}
+.pf-card .av{font-size:64px;margin-bottom:6px;}
+.pf-card .nm{font-size:20px;font-weight:800;}
+.pf-card .un{font-size:13px;opacity:.85;margin-bottom:8px;}
+.pf-card .rl{display:inline-block;background:rgba(0,0,0,.35);padding:7px 16px;border-radius:999px;font-size:13px;font-weight:700;}
+.pf-stat{margin-top:12px;background:#1e293b;border-radius:14px;padding:16px;display:flex;justify-content:space-between;align-items:center;font-size:14px;}
+.pf-stat .v{font-size:26px;font-weight:900;color:#fbbf24;}
+.tr-list{padding:14px;display:flex;flex-direction:column;gap:12px;}
+.tr-card{background:linear-gradient(135deg,#1e293b,#0f172a);border:2px solid #334155;border-radius:16px;padding:16px;display:flex;flex-direction:column;gap:10px;}
+.tr-card .hdr{display:flex;justify-content:space-between;align-items:center;gap:10px;}
+.tr-card .name{font-size:16px;font-weight:800;color:#fef3c7;}
+.tr-card .emoji{font-size:28px;}
+.tr-card .meta{display:flex;gap:12px;flex-wrap:wrap;font-size:12px;color:#cbd5e1;}
+.tr-card .meta b{color:#fbbf24;}
+.tr-card .btn-start{padding:14px;border-radius:12px;border:none;background:linear-gradient(135deg,#16a34a,#22c55e);color:#fff;font-weight:900;font-size:15px;cursor:pointer;letter-spacing:1px;box-shadow:0 4px 12px rgba(34,197,94,.4);}
+.tr-card .btn-start:disabled{background:#475569;box-shadow:none;}
+.empty{padding:40px 20px;text-align:center;color:#94a3b8;}
+.room-head{padding:16px 14px 8px;text-align:center;}
+.room-title{font-family:Georgia,serif;font-size:24px;font-weight:900;letter-spacing:2px;background:linear-gradient(135deg,#fbbf24,#f59e0b,#fbbf24);-webkit-background-clip:text;background-clip:text;color:transparent;text-shadow:0 2px 10px rgba(251,191,36,.4);margin-bottom:10px;}
+.room-prize{display:inline-block;padding:10px 22px;border:3px solid #fbbf24;border-radius:14px;background:linear-gradient(135deg,rgba(251,191,36,.15),rgba(245,158,11,.05));color:#fbbf24;font-weight:900;font-size:15px;box-shadow:0 0 20px rgba(251,191,36,.3),inset 0 0 20px rgba(251,191,36,.1);}
+.counter-badge{display:inline-block;padding:6px 14px;background:#334155;border-radius:999px;font-size:13px;margin-top:8px;color:#cbd5e1;font-weight:700;}
+.wheel-wrap{padding:14px;display:flex;justify-content:center;}
+#wheel{width:90vw;max-width:460px;filter:drop-shadow(0 0 40px rgba(219,39,119,.5));}
+.wheel-stage{position:relative;display:flex;justify-content:center;align-items:center;}
+.pointer{position:absolute;top:-4px;left:50%;transform:translateX(-50%);font-size:40px;color:#fbbf24;text-shadow:0 4px 10px rgba(0,0,0,.9);z-index:3;}
+.spin-big{display:flex;justify-content:center;padding:8px 16px 16px;}
+.spin-big button{padding:18px 40px;border-radius:999px;border:none;background:linear-gradient(135deg,#db2777,#f59e0b);color:#fff;font-weight:900;font-size:18px;letter-spacing:2px;box-shadow:0 8px 24px rgba(219,39,119,.5);cursor:pointer;}
+.spin-big button:disabled{background:#475569;box-shadow:none;}
+.participants{margin:0 14px 20px;background:#1e293b;border-radius:14px;padding:14px;border:1px solid #334155;}
+.participants h3{margin:0 0 10px;font-size:14px;color:#fbbf24;font-weight:800;}
+.p-list{max-height:280px;overflow-y:auto;display:flex;flex-direction:column;gap:4px;}
+.p-list::-webkit-scrollbar{width:6px;}
+.p-list::-webkit-scrollbar-track{background:#0f172a;border-radius:3px;}
+.p-list::-webkit-scrollbar-thumb{background:#475569;border-radius:3px;}
+.p-row{display:flex;justify-content:space-between;padding:8px 12px;background:#0f172a;border-radius:8px;font-size:13px;}
+.p-row.elim{color:#fca5a5;text-decoration:line-through;opacity:.7;}
+.p-row.win{color:#86efac;font-weight:800;}
+.table-wrap{padding:8px;display:flex;justify-content:center;align-items:center;}
+.table-felt{position:relative;width:100%;max-width:520px;aspect-ratio:4/5;border-radius:50%/40%;background:radial-gradient(ellipse at center,#16a34a 0%,#065f46 100%);border:10px solid #b45309;box-shadow:inset 0 0 80px rgba(0,0,0,.3),0 0 40px rgba(251,191,36,.3);display:flex;align-items:center;justify-content:center;}
+.pot{position:absolute;top:6%;left:50%;transform:translateX(-50%);background:linear-gradient(135deg,#facc15,#f59e0b);padding:8px 20px;border-radius:999px;font-weight:900;color:#422006;font-size:15px;box-shadow:0 4px 12px rgba(0,0,0,.5);}
+.community{display:flex;gap:6px;justify-content:center;align-items:center;position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);}
+.card{width:46px;height:64px;background:#fff;color:#111;border-radius:8px;display:flex;flex-direction:column;justify-content:space-between;align-items:center;padding:4px;font-weight:800;font-size:16px;box-shadow:0 4px 8px rgba(0,0,0,.5);animation:dealCard .35s ease-out;}
+.card.red{color:#dc2626;}
+.card.back{background:repeating-linear-gradient(45deg,#2563eb,#2563eb 8px,#7c3aed 8px,#7c3aed 16px);color:transparent;}
+@keyframes dealCard{from{transform:translateY(-60px) rotate(-25deg);opacity:0;}to{transform:translateY(0) rotate(0);opacity:1;}}
+#players-ring{position:absolute;inset:0;}
+.player{position:absolute;width:92px;transform:translate(-50%,-50%);background:linear-gradient(135deg,#1e293b,#334155);border:3px solid #475569;border-radius:14px;padding:8px 5px 5px;text-align:center;font-size:12px;transition:all .25s;}
+.player.turn{border-color:#facc15;box-shadow:0 0 24px #facc15,0 0 12px #f59e0b;}
+.player.folded{opacity:.35;filter:grayscale(1);}
+.player .name{font-weight:800;font-size:12px;color:#fef3c7;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.player .chips{color:#fbbf24;font-weight:800;font-size:13px;text-shadow:0 0 6px rgba(251,191,36,.5);}
+.player .bet{color:#22d3ee;font-size:11px;font-weight:700;}
+.player .cards{display:flex;gap:2px;justify-content:center;margin-top:3px;}
+.player .cards .mini{width:18px;height:26px;border-radius:3px;background:#fff;color:#111;font-size:10px;display:flex;align-items:center;justify-content:center;font-weight:800;}
+.player .cards .mini.red{color:#dc2626;}
+.player .cards .mini.back{background:#1e40af;color:transparent;}
+.log-box{margin:6px 10px;padding:8px 12px;background:#0f172a;border:1px solid #334155;border-radius:10px;font-size:11px;color:#94a3b8;max-height:60px;overflow-y:auto;white-space:pre-line;}
+.actions-frame{margin:8px 12px;padding:12px;border:3px solid #a78bfa;border-radius:18px;background:linear-gradient(135deg,rgba(124,58,237,.15),rgba(30,64,175,.15));box-shadow:0 0 24px rgba(167,139,250,.3),inset 0 0 24px rgba(167,139,250,.05);}
+.actions{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;}
+.btn{border:none;border-radius:12px;padding:14px 10px;color:#fff;font-weight:800;font-size:14px;cursor:pointer;transition:transform .1s,opacity .15s;background:#334155;box-shadow:0 3px 8px rgba(0,0,0,.3);}
+.btn:active{transform:scale(.95);}
+.btn:disabled{opacity:.35;}
+.btn-fold{background:linear-gradient(135deg,#991b1b,#dc2626);}
+.btn-check{background:linear-gradient(135deg,#1e40af,#2563eb);}
+.btn-call{background:linear-gradient(135deg,#065f46,#16a34a);}
+.btn-raise{background:linear-gradient(135deg,#b45309,#f59e0b);}
+.btn-allin{background:linear-gradient(135deg,#7c3aed,#a855f7);}
+.raise-row{display:flex;align-items:center;gap:12px;padding:8px 14px 4px;}
+.raise-row input{flex:1;}
+#raise-amount{font-weight:800;color:#fbbf24;min-width:60px;text-align:right;}
+.timer-bar{height:8px;background:#1e293b;overflow:hidden;border-radius:4px;margin:8px 14px;}
+#timer-fill{height:100%;width:0%;background:linear-gradient(90deg,#22c55e,#eab308,#ef4444);transition:width .3s linear;}
+.waiting-box{display:flex;flex-direction:column;align-items:center;justify-content:center;flex:1;padding:40px 20px;gap:16px;text-align:center;}
+.waiting-ico{font-size:80px;animation:pulse 1.6s infinite ease-in-out;}
+@keyframes pulse{0%,100%{opacity:1;transform:scale(1);}50%{opacity:.6;transform:scale(1.08);}}
+.waiting-txt{font-size:17px;color:#94a3b8;font-weight:700;}
+.modal{position:fixed;inset:0;background:rgba(0,0,0,.85);display:flex;align-items:center;justify-content:center;z-index:100;padding:16px;}
+.modal-card{background:linear-gradient(135deg,#1e293b,#0f172a);border:2px solid #475569;border-radius:20px;padding:26px 22px;max-width:380px;width:100%;text-align:center;animation:pop .3s ease-out;max-height:90vh;overflow-y:auto;}
+@keyframes pop{from{transform:scale(.7);opacity:0;}to{transform:scale(1);opacity:1;}}
+#modal-title{font-size:22px;font-weight:900;margin-bottom:14px;color:#fbbf24;}
+#modal-body{font-size:14px;color:#e2e8f0;margin-bottom:16px;line-height:1.6;}
+.modal-btns{display:flex;gap:8px;flex-wrap:wrap;}
+.modal-btns .btn{flex:1;min-width:120px;}
+.kick-list{display:flex;flex-direction:column;gap:6px;margin-top:8px;}
+.kick-list button{padding:12px;background:#7f1d1d;color:#fff;border:none;border-radius:8px;font-weight:700;cursor:pointer;font-size:13px;}
+.confetti{position:fixed;inset:0;pointer-events:none;z-index:99;}
+</style>
+</head>
+<body>
+<div id="app">
+  <header id="topbar">
+    <div id="title">🏆 Турнир</div>
+    <div id="admin-toolbar" class="hidden">
+      <button id="ad-pause" class="btn-admin">⏸</button>
+      <button id="ad-kick" class="btn-admin">🚫</button>
+      <button id="ad-end" class="btn-admin">🏁</button>
+    </div>
+    <button id="leave-btn" class="btn-leave hidden">🚪 Выйти</button>
+    <div id="status" class="status">Подключение…</div>
+  </header>
+
+  <div id="tabs" class="tabs">
+    <div class="tab active" data-tab="profile">👤 Профиль</div>
+    <div class="tab" data-tab="tournaments">🏆 Турниры</div>
+  </div>
+
+  <main id="profile-view" class="view">
+    <div class="pf-wrap">
+      <div class="pf-card">
+        <div class="av">👤</div>
+        <div class="nm" id="pf-name">—</div>
+        <div class="un" id="pf-uname"></div>
+        <div class="rl" id="pf-role">🎮 Игрок</div>
+      </div>
+      <div class="pf-stat"><span>🏆 Побед</span><span class="v" id="pf-wins">0</span></div>
+    </div>
+  </main>
+
+  <main id="tournaments-view" class="view hidden">
+    <div class="tr-list" id="tr-list">
+      <div class="empty">Загрузка…</div>
+    </div>
+  </main>
+
+  <main id="room-view" class="view hidden">
+    <div class="room-head">
+      <div class="room-title" id="rm-title">—</div>
+      <div class="room-prize" id="rm-prize">🏆 Приз</div>
+      <div class="counter-badge" id="rm-counter">👥 Игроков: 0</div>
+    </div>
+    <div id="room-content"></div>
+  </main>
+
+  <div id="modal" class="modal hidden"><div class="modal-card">
+    <div id="modal-title"></div><div id="modal-body"></div>
+    <div class="modal-btns" id="modal-btns"></div>
+  </div></div>
+  <canvas id="confetti" class="confetti hidden"></canvas>
+</div>
+<script>
+const tg = window.Telegram?.WebApp;
+tg?.ready(); tg?.expand?.();
+const INIT_DATA = tg?.initData || "";
+const els = {
+  title: document.getElementById("title"), status: document.getElementById("status"),
+  tabs: document.getElementById("tabs"),
+  profileView: document.getElementById("profile-view"),
+  tournamentsView: document.getElementById("tournaments-view"),
+  roomView: document.getElementById("room-view"),
+  trList: document.getElementById("tr-list"),
+  pfName: document.getElementById("pf-name"), pfUname: document.getElementById("pf-uname"),
+  pfRole: document.getElementById("pf-role"), pfWins: document.getElementById("pf-wins"),
+  rmTitle: document.getElementById("rm-title"), rmPrize: document.getElementById("rm-prize"),
+  rmCounter: document.getElementById("rm-counter"),
+  roomContent: document.getElementById("room-content"),
+  leaveBtn: document.getElementById("leave-btn"),
+  adminToolbar: document.getElementById("admin-toolbar"),
+  adPause: document.getElementById("ad-pause"),
+  adKick: document.getElementById("ad-kick"),
+  adEnd: document.getElementById("ad-end"),
+  modal: document.getElementById("modal"), modalTitle: document.getElementById("modal-title"),
+  modalBody: document.getElementById("modal-body"), modalBtns: document.getElementById("modal-btns"),
+  confetti: document.getElementById("confetti"),
+};
+let MY_ID = null, IS_ADMIN = false, WS = null, ACTIVE_TID = null;
+let GAME_TYPE = null, LAST_STATE = null;
+let IS_CREATOR = false, IS_PARTICIPANT = false;
+let WHEEL_ANGLE = 0, WHEEL_SPINNING = false;
+
+function show(el){el.classList.remove("hidden");}
+function hide(el){el.classList.add("hidden");}
+function setStatus(t,c){els.status.textContent=t; els.status.className="status "+(c||"");}
+function escapeHtml(s){return String(s||"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));}
+
+document.querySelectorAll(".tab").forEach(t => {
+  t.addEventListener("click", () => {
+    if(ACTIVE_TID) return;
+    document.querySelectorAll(".tab").forEach(x => x.classList.remove("active"));
+    t.classList.add("active");
+    hide(els.profileView); hide(els.tournamentsView);
+    if(t.dataset.tab === "profile") show(els.profileView);
+    else { show(els.tournamentsView); loadTournaments(); }
+  });
+});
+
+(async function boot(){
+  if(!INIT_DATA){setStatus("Нет данных","err");return;}
+  await loadProfile();
+  setStatus("🟢 Онлайн","ok");
+})();
+
+async function loadProfile(){
+  try{
+    const r = await fetch(`/api/profile?initData=${encodeURIComponent(INIT_DATA)}`);
+    if(!r.ok) throw new Error(await r.text());
+    const p = await r.json();
+    MY_ID = p.user_id;
+    IS_ADMIN = p.is_admin;
+    els.pfName.textContent = p.first_name || "Игрок";
+    els.pfUname.textContent = p.username ? "@"+p.username : "";
+    els.pfWins.textContent = p.wins || 0;
+    els.pfRole.textContent = IS_ADMIN ? "🛠 Администратор" : "🎮 Игрок";
+  }catch(e){ console.error(e); }
+}
+
+async function loadTournaments(){
+  els.trList.innerHTML = '<div class="empty">Загрузка…</div>';
+  try{
+    const r = await fetch(`/api/profile?initData=${encodeURIComponent(INIT_DATA)}`);
+    const p = await r.json();
+    const tours = p.tournaments || [];
+    if(!tours.length){
+      els.trList.innerHTML = '<div class="empty">📭 Вы пока не участвуете ни в одном турнире</div>';
+      return;
+    }
+    els.trList.innerHTML = "";
+    tours.forEach(t => {
+      const emoji = t.game_type === "poker" ? "🃏" : "🎡";
+      const gameName = t.game_type === "poker" ? "Покер" : "Колесо Фортуны";
+      const canStart = t.status === "running" || t.status === "paused";
+      const card = document.createElement("div");
+      card.className = "tr-card";
+      card.innerHTML = `
+        <div class="hdr">
+          <div class="name">${escapeHtml(t.name)}</div>
+          <div class="emoji">${emoji}</div>
+        </div>
+        <div class="meta">
+          <span>Игра: <b>${gameName}</b></span>
+          <span>Статус: <b>${t.status}</b></span>
+        </div>
+        ${t.prize ? `<div class="meta">🎁 Приз: <b>${escapeHtml(t.prize)}</b></div>` : ""}
+        <button class="btn-start" ${canStart?"":"disabled"}>${canStart ? "🎮 НАЧАТЬ" : (t.status==="registration" ? "⏳ Ожидание старта" : "🏁 Завершён")}</button>
+      `;
+      card.querySelector(".btn-start").addEventListener("click", () => {
+        if(canStart) openRoom(t.tid);
+      });
+      els.trList.appendChild(card);
+    });
+  }catch(e){ els.trList.innerHTML = '<div class="empty">Ошибка: '+escapeHtml(e.message)+'</div>'; }
+}
+
+async function openRoom(tid){
+  try{
+    const r = await fetch(`/api/tournament/${tid}?initData=${encodeURIComponent(INIT_DATA)}`);
+    if(!r.ok){
+      const e = await r.json().catch(()=>({detail:"Ошибка"}));
+      showModal("⚠ Ошибка", e.detail || "Не удалось войти", []);
+      return;
+    }
+    const info = await r.json();
+    GAME_TYPE = info.game_type;
+    ACTIVE_TID = tid;
+    IS_ADMIN = info.is_admin;
+    IS_PARTICIPANT = info.is_participant;
+    hide(els.tabs); hide(els.profileView); hide(els.tournamentsView);
+    show(els.roomView);
+    els.title.textContent = `🏆 ${info.name}`;
+    els.rmTitle.textContent = info.name;
+    els.rmPrize.textContent = "🏆 " + (info.prize || "Приз");
+    show(els.leaveBtn);
+    // Показываем toolbar ТОЛЬКО если админ И участник
+    if(IS_ADMIN && IS_PARTICIPANT) show(els.adminToolbar);
+    else hide(els.adminToolbar);
+    connectWS(tid);
+  }catch(e){ showModal("⚠ Ошибка", e.message, []); }
+}
+
+function exitRoom(){
+  if(WS) try{WS.close();}catch(e){}
+  WS = null; ACTIVE_TID = null; GAME_TYPE = null; LAST_STATE = null;
+  hide(els.roomView); hide(els.leaveBtn); hide(els.adminToolbar);
+  show(els.tabs);
+  document.querySelectorAll(".tab").forEach(x => x.classList.remove("active"));
+  document.querySelector('.tab[data-tab="tournaments"]').classList.add("active");
+  show(els.tournamentsView);
+  loadTournaments();
+}
+
+function connectWS(tid){
+  if(WS) try{WS.close();}catch(e){}
+  const proto = location.protocol === "https:" ? "wss" : "ws";
+  const url = `${proto}://${location.host}/ws/${tid}?initData=${encodeURIComponent(INIT_DATA)}`;
+  WS = new WebSocket(url);
+  WS.onopen = () => setStatus("🟢 Онлайн","ok");
+  WS.onclose = () => {
+    if(!ACTIVE_TID) return;
+    setStatus("🔴 Оффлайн","err"); setTimeout(()=>{ if(ACTIVE_TID) connectWS(ACTIVE_TID); },2000);
+  };
+  WS.onerror = () => setStatus("⚠ Ошибка","err");
+  WS.onmessage = (ev) => {
+    const msg = JSON.parse(ev.data);
+    if(msg.type === "poker_state") renderPoker(msg);
+    else if(msg.type === "wheel_state") renderWheel(msg);
+    else if(msg.type === "left_tournament"){
+      showModal("🚪 Вы вышли","Мини-апп можно закрыть",[{text:"Закрыть",color:"#334155",onClick:()=>{hide(els.modal);exitRoom();}}]);
+    }
+    else if(msg.type === "player_kicked" && msg.user_id === MY_ID){
+      showModal("🚫 Исключение","Администратор удалил вас",[{text:"ОК",color:"#334155",onClick:()=>{hide(els.modal);exitRoom();}}]);
+    }
+    else if(msg.type === "tournament_ended"){
+      showModal("🏁 Турнир завершён","Администратор остановил турнир",[{text:"ОК",color:"#334155",onClick:()=>{hide(els.modal);exitRoom();}}]);
+    }
+    else if(msg.type === "tournament_cancelled"){
+      showModal("🛑 Отменён","Турнир отменён",[{text:"ОК",color:"#334155",onClick:()=>{hide(els.modal);exitRoom();}}]);
+    }
+    else if(msg.type === "final_table"){
+      showModal("🎯 ФИНАЛЬНЫЙ СТОЛ","Все игроки собраны за одним столом!",[]);
+    }
+  };
+}
+function wsSend(o){ if(WS && WS.readyState===1) WS.send(JSON.stringify(o)); }
+
+function renderPoker(s){
+  LAST_STATE = s;
+  if(s.table_id !== undefined && s.table_count !== undefined){
+    els.rmCounter.textContent = `🃏 Стол ${s.table_id + 1} / ${s.table_count} · Игроков: ${(s.players||[]).length}`;
+  }
+  let html = "";
+  if(s.you_eliminated || s.phase === "eliminated"){
+    html = `<div class="waiting-box">
+      <div class="waiting-ico">🚫</div>
+      <div class="waiting-txt">Вы выбыли из турнира</div>
+      <div style="color:#94a3b8;font-size:13px;">Наблюдайте за игрой или дождитесь итогов</div>
+    </div>`;
+  } else if(s.phase === "waiting"){
+    html = `<div class="waiting-box">
+      <div class="waiting-ico">⏳</div>
+      <div class="waiting-txt">Ожидание старта турнира…</div>
+    </div>`;
+  } else {
+    html = `
+      <div class="table-wrap"><div class="table-felt">
+        <div class="pot">💰 Банк: ${s.pot}</div>
+        <div class="community" id="comm"></div>
+        <div id="ring"></div>
+      </div></div>
+      <div class="log-box" id="logbox"></div>
+      <div class="actions-frame">
+        <div class="actions" id="acts">
+          <button class="btn btn-fold" data-act="fold">Фолд</button>
+          <button class="btn btn-check" data-act="check">Чек</button>
+          <button class="btn btn-call" data-act="call">Колл</button>
+          <button class="btn btn-raise" data-act="raise">Рейз</button>
+          <button class="btn btn-allin" data-act="allin">Олл-ин</button>
+        </div>
+        <div class="raise-row hidden" id="rrow">
+          <input type="range" id="rslider" min="0" max="1000" value="0" step="10" />
+          <span id="ramount">0</span>
+        </div>
+      </div>
+      <div class="timer-bar"><div id="tfill"></div></div>
+    `;
+  }
+  els.roomContent.innerHTML = html;
+  if(s.phase === "waiting" || s.you_eliminated || s.phase === "eliminated") return;
+
+  const comm = document.getElementById("comm");
+  (s.community||[]).forEach(c => comm.appendChild(makeCard(c)));
+  const ring = document.getElementById("ring");
+  const total = Math.max((s.players||[]).length, 1);
+  const cx=50, cy=50, rx=38, ry=42;
+  (s.players||[]).forEach((p,i) => {
+    const angle = (i/total)*Math.PI*2 - Math.PI/2;
+    const x = cx + rx*Math.cos(angle), y = cy + ry*Math.sin(angle);
+    const div = document.createElement("div");
+    div.className = "player" + (p.is_turn?" turn":"") + (p.folded?" folded":"");
+    div.style.left = x+"%"; div.style.top = y+"%";
+    const cardsHTML = (p.cards||[]).map(c => {
+      if(c==="?") return `<div class="mini back">?</div>`;
+      const red = c.includes("♥")||c.includes("♦");
+      return `<div class="mini ${red?"red":""}">${c}</div>`;
+    }).join("");
+    div.innerHTML = `<div class="name">${escapeHtml(p.name)}</div><div class="chips">💰 ${p.chips}</div>${p.bet?`<div class="bet">${p.bet}</div>`:""}<div class="cards">${cardsHTML}</div>`;
+    ring.appendChild(div);
+  });
+  document.getElementById("logbox").textContent = (s.log||[]).join("\n");
+  const me = (s.players||[]).find(p => p.user_id === MY_ID);
+  const myTurn = me && s.turn_idx>=0 && s.players[s.turn_idx] && s.players[s.turn_idx].user_id===MY_ID && !me.folded && !me.all_in;
+  [...document.querySelectorAll("#acts button")].forEach(b => b.disabled = !myTurn);
+  const toCall = me ? Math.max(0, s.current_bet - me.bet) : 0;
+  const cb = document.querySelector('[data-act="check"]');
+  const cl = document.querySelector('[data-act="call"]');
+  if(cb) cb.classList.toggle("hidden", toCall>0);
+  if(cl) cl.classList.toggle("hidden", toCall===0);
+  if(toCall>0 && me && cl) cl.textContent = `Колл ${Math.min(toCall, me.chips)}`;
+  else if(cl) cl.textContent = "Колл";
+  const rrow = document.getElementById("rrow");
+  if(myTurn && me && rrow){
+    const rslider = document.getElementById("rslider");
+    const minR = s.min_raise||s.big_blind, maxR = me.chips;
+    rslider.min = minR; rslider.max = Math.max(minR,maxR);
+    rslider.value = minR; document.getElementById("ramount").textContent = minR;
+    rrow.classList.remove("hidden");
+    rslider.oninput = () => document.getElementById("ramount").textContent = rslider.value;
+  }
+  const tfill = document.getElementById("tfill");
+  if(s.turn_deadline && myTurn && tfill){
+    const total2 = s.turn_time||20;
+    const rem = Math.max(0, s.turn_deadline - Date.now()/1000);
+    tfill.style.width = Math.min(100,(rem/total2)*100)+"%";
+  }
+  if(s.finished && s.winner_info){
+    showModal("🏆 ЗАВЕРШЁН!",`Победитель: <b>${escapeHtml(s.winner_info.name)}</b>`,[]);
+    fireConfetti();
+  }
+}
+function makeCard(c){
+  const div = document.createElement("div");
+  const red = c.includes("♥")||c.includes("♦");
+  div.className = "card" + (red?" red":"");
+  if(c==="?") div.classList.add("back");
+  div.textContent = c;
+  return div;
+}
+
+function renderWheel(s){
+  LAST_STATE = s;
+  els.rmCounter.textContent = `🎡 На колесе: ${(s.active||[]).length} игроков`;
+  let html = `
+    <div class="wheel-stage">
+      <div class="pointer">▼</div>
+      <canvas id="wheel" width="640" height="640"></canvas>
+    </div>
+    <div class="spin-big">
+      <button id="spin-btn" ${(s.finished||(s.active||[]).length<2)?"disabled":""}>🎡 КРУТИТЬ</button>
+    </div>
+    <div class="participants">
+      <h3>👥 Участники (${(s.active||[]).length + (s.eliminated||[]).length})</h3>
+      <div class="p-list">
+  `;
+  (s.active||[]).forEach(p => {
+    html += `<div class="p-row"><span>🟢 ${escapeHtml(p.name)}</span><span>в игре</span></div>`;
+  });
+  (s.eliminated||[]).slice().sort((a,b)=>b.place-a.place).forEach(p => {
+    const cls = p.place === 1 ? "p-row win" : "p-row elim";
+    html += `<div class="${cls}"><span>${p.place===1?"🏆":"❌"} ${escapeHtml(p.name)}</span><span>место ${p.place}</span></div>`;
+  });
+  html += `</div></div>`;
+  els.roomContent.innerHTML = html;
+
+  const canvas = document.getElementById("wheel");
+  const spinBtn = document.getElementById("spin-btn");
+  drawWheel(canvas, s.active);
+  if(spinBtn) spinBtn.addEventListener("click", () => {
+    if(WHEEL_SPINNING) return;
+    wsSend({type:"spin"});
+  });
+  if(s.last_spin && s.last_spin._shownFor !== s.spin_count){
+    s.last_spin._shownFor = s.spin_count;
+    animateSpin(s);
+  }
+  if(s.finished && s.winner){
+    setTimeout(()=>{
+      showModal("🏆 ПОБЕДИТЕЛЬ!",`<b>${escapeHtml(s.winner.name)}</b><br>${escapeHtml(s.prize||"")}`,[]);
+      fireConfetti();
+    },800);
+  }
+}
+
+function drawWheel(canvas, active){
+  if(!canvas) return;
+  const ctx = canvas.getContext("2d");
+  const W = canvas.width, H = canvas.height;
+  const cx = W/2, cy = H/2, r = Math.min(W,H)/2 - 20;
+  ctx.clearRect(0,0,W,H);
+  const palette = ["#ef4444","#f59e0b","#10b981","#3b82f6","#8b5cf6","#ec4899","#14b8a6","#f43f5e","#84cc16","#06b6d4","#f97316","#a855f7"];
+  const n = Math.max(active.length,1);
+  if(active.length === 0){
+    ctx.beginPath();ctx.arc(cx,cy,r,0,Math.PI*2);ctx.fillStyle="#1e293b";ctx.fill();
+    ctx.strokeStyle="#334155";ctx.lineWidth=4;ctx.stroke();
+    ctx.fillStyle="#94a3b8";ctx.font="bold 26px sans-serif";ctx.textAlign="center";ctx.textBaseline="middle";
+    ctx.fillText("Ожидание",cx,cy);
+    return;
+  }
+  for(let i=0;i<n;i++){
+    const a0=(i/n)*Math.PI*2-Math.PI/2+WHEEL_ANGLE;
+    const a1=((i+1)/n)*Math.PI*2-Math.PI/2+WHEEL_ANGLE;
+    ctx.beginPath();ctx.moveTo(cx,cy);ctx.arc(cx,cy,r,a0,a1);ctx.closePath();
+    ctx.fillStyle=palette[i%palette.length];ctx.fill();
+    ctx.strokeStyle="#0f172a";ctx.lineWidth=2;ctx.stroke();
+    const mid=(a0+a1)/2;
+    ctx.save();ctx.translate(cx,cy);ctx.rotate(mid);ctx.textAlign="right";
+    ctx.fillStyle="#fff";ctx.font="bold 18px sans-serif";
+    const label = active[i].name || "";
+    ctx.fillText(label.length>14?label.slice(0,14)+"…":label,r-14,7);ctx.restore();
+  }
+  ctx.beginPath();ctx.arc(cx,cy,50,0,Math.PI*2);ctx.fillStyle="#0f172a";ctx.fill();
+  ctx.strokeStyle="#fbbf24";ctx.lineWidth=5;ctx.stroke();
+  ctx.fillStyle="#fbbf24";ctx.font="bold 28px sans-serif";ctx.textAlign="center";ctx.textBaseline="middle";
+  ctx.fillText("🎡",cx,cy);
+}
+
+function animateSpin(s){
+  if(WHEEL_SPINNING) return;
+  WHEEL_SPINNING = true;
+  const canvas = document.getElementById("wheel");
+  if(!canvas){ WHEEL_SPINNING = false; return; }
+  const activeBefore = s.active.concat([s.last_spin.eliminated]);
+  const n = activeBefore.length, idx = s.last_spin.sector_index;
+  const baseAngle = WHEEL_ANGLE;
+  const duration = 8000;
+  const turns = 8 + Math.random()*2;
+  const target = baseAngle + turns*Math.PI*2 + (((-(idx+0.5)/n*Math.PI*2)-baseAngle)%(Math.PI*2));
+  const start = performance.now(), startA = WHEEL_ANGLE;
+  const oldActive = s.active.slice();
+  function frame(t){
+    const k = Math.min(1,(t-start)/duration);
+    const eased = 1 - Math.pow(1-k,4);
+    WHEEL_ANGLE = startA + (target-startA)*eased;
+    const c = document.getElementById("wheel");
+    if(c) drawWheel(c, activeBefore);
+    if(k<1) requestAnimationFrame(frame);
+    else {
+      WHEEL_ANGLE = target;
+      const c2 = document.getElementById("wheel");
+      if(c2) drawWheel(c2, oldActive);
+      WHEEL_SPINNING = false;
+      showModal("❌ Выбывает",`<b>${escapeHtml(s.last_spin.eliminated.name)}</b><br>покидает турнир!`,[]);
+    }
+  }
+  requestAnimationFrame(frame);
+}
+
+document.addEventListener("click", e => {
+  const btn = e.target.closest("#acts button");
+  if(!btn || btn.disabled) return;
+  const act = btn.dataset.act;
+  let amount = 0;
+  if(act==="raise"){ const sl = document.getElementById("rslider"); amount = sl?parseInt(sl.value,10)||0:0; }
+  wsSend({type:"poker_action", action:act, amount});
+});
+
+els.leaveBtn.addEventListener("click", () => {
+  showConfirm("🚪 Покинуть турнир?","Вы выйдете досрочно. Подтвердить?", () => {
+    wsSend({type:"leave_tournament"});
+  });
+});
+
+els.adEnd.addEventListener("click", () => {
+  showConfirm("🏁 Закончить турнир?","Турнир будет остановлен для всех.", () => {
+    wsSend({type:"admin_end_tournament"});
+  });
+});
+els.adPause.addEventListener("click", () => {
+  const isPaused = els.adPause.textContent.includes("▶");
+  showConfirm(isPaused ? "▶️ Продолжить?" : "⏸ Пауза?",
+              isPaused ? "Игра возобновится." : "Все действия приостановлены.",
+              () => { wsSend({type: isPaused ? "admin_resume_tournament" : "admin_pause_tournament"}); });
+});
+els.adKick.addEventListener("click", () => {
+  const players = (LAST_STATE?.players||[]).filter(p => p.user_id !== MY_ID);
+  if(!players.length){ showModal("Нет игроков","Нечего удалять",[]); return; }
+  const html = `<div class="kick-list">` + players.map(p =>
+    `<button data-uid="${p.user_id}">🚫 ${escapeHtml(p.name)}</button>`).join("") + `</div>`;
+  showModal("🚫 Удалить игрока", html, []);
+  document.querySelectorAll("#modal-body button[data-uid]").forEach(b => {
+    b.addEventListener("click", () => {
+      const uid = parseInt(b.dataset.uid,10);
+      const name = b.textContent.replace("🚫 ","");
+      hide(els.modal);
+      showConfirm("🚫 Удалить игрока?","Игрок "+name+" будет исключён.", () => {
+        wsSend({type:"admin_kick_player", user_id: uid});
+      });
+    });
+  });
+});
+
+function showModal(title, body, buttons){
+  els.modalTitle.textContent = title;
+  els.modalBody.innerHTML = body;
+  if(!buttons || !buttons.length){
+    els.modalBtns.innerHTML = '<button class="btn" id="mc">Закрыть</button>';
+    document.getElementById("mc").onclick = () => hide(els.modal);
+  } else {
+    els.modalBtns.innerHTML = "";
+    buttons.forEach(b => {
+      const btn = document.createElement("button");
+      btn.className = "btn"; btn.style.background = b.color||"#334155"; btn.textContent = b.text;
+      btn.onclick = b.onClick; els.modalBtns.appendChild(btn);
+    });
+  }
+  show(els.modal);
+}
+function showConfirm(title, body, onYes){
+  els.modalTitle.textContent = title;
+  els.modalBody.innerHTML = body;
+  els.modalBtns.innerHTML = `
+    <button class="btn" style="background:#b91c1c;" id="cy">Да</button>
+    <button class="btn" style="background:#334155;" id="cn">Отмена</button>`;
+  document.getElementById("cy").onclick = () => { hide(els.modal); onYes(); };
+  document.getElementById("cn").onclick = () => hide(els.modal);
+  show(els.modal);
+}
+
+function fireConfetti(){
+  const canvas = els.confetti;
+  show(canvas);
+  canvas.width = window.innerWidth; canvas.height = window.innerHeight;
+  const ctx = canvas.getContext("2d");
+  const pieces = Array.from({length:160},()=>({
+    x:Math.random()*canvas.width, y:-20-Math.random()*200,
+    vy:2+Math.random()*3, vx:-1+Math.random()*2,
+    r:4+Math.random()*5, color:`hsl(${Math.random()*360},90%,60%)`,
+    rot:Math.random()*Math.PI, vr:-0.1+Math.random()*0.2,
+  }));
+  let f = 0;
+  function loop(){
+    ctx.clearRect(0,0,canvas.width,canvas.height);
+    pieces.forEach(p => {
+      p.x += p.vx; p.y += p.vy; p.rot += p.vr;
+      ctx.save(); ctx.translate(p.x,p.y); ctx.rotate(p.rot);
+      ctx.fillStyle = p.color; ctx.fillRect(-p.r,-p.r,p.r*2,p.r*0.6); ctx.restore();
+    });
+    f++; if(f<400) requestAnimationFrame(loop); else hide(canvas);
+  }
+  loop();
+}
+</script>
+</body>
+</html>
