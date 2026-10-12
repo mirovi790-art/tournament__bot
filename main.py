@@ -99,7 +99,7 @@ def admin_menu_kb():
 
 def back_kb(target="back_main"):
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="⬅️ Назад", callback_data=target)])
+        [InlineKeyboardButton(text="⬅️ Назад", callback_data=target)]])
 
 
 def access_type_kb():
