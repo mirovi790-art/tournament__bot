@@ -47,6 +47,7 @@ class Tournament(Base):
     turn_time: Mapped[int] = mapped_column(Integer, default=20)
     blind_interval: Mapped[int] = mapped_column(Integer, default=5)
     min_players: Mapped[int] = mapped_column(Integer, default=2)
+    auto_start_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     prize: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
@@ -64,9 +65,10 @@ class Participant(Base):
 
 
 async def init_db():
+    # создаём таблицы по текущим моделям
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
-    # авто-миграции
+    # авто-миграция: добавляем недостающие колонки в существующие таблицы
     async with engine.begin() as conn:
         try:
             res = await conn.exec_driver_sql("PRAGMA table_info(tournaments)")
@@ -74,6 +76,9 @@ async def init_db():
             if "min_players" not in cols:
                 await conn.exec_driver_sql(
                     "ALTER TABLE tournaments ADD COLUMN min_players INTEGER DEFAULT 2")
+            if "auto_start_at" not in cols:
+                await conn.exec_driver_sql(
+                    "ALTER TABLE tournaments ADD COLUMN auto_start_at DATETIME")
         except Exception:
             pass
         try:
