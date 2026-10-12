@@ -61,11 +61,50 @@ async def _upsert_user(fu):
 
 
 def _display_name(u, uid):
-    """Имя игрока: first_name → @username → Игрок #id."""
+    """Имя: first_name → @username → Игрок #id."""
     if u:
-        if u.first_name: return u.first_name
-        if u.username: return "@" + u.username
+        if u.first_name and u.first_name.strip(): return u.first_name.strip()
+        if u.username and u.username.strip(): return "@" + u.username.strip()
     return f"Игрок {uid}"
+
+
+async def _enrich_names(bot, user_ids):
+    """
+    Для каждого uid без имени в БД запрашивает данные из Telegram (bot.get_chat).
+    Возвращает dict {uid: display_name}. Сохраняет обновления в БД.
+    """
+    result = {}
+    async with SessionLocal() as s:
+        for uid in user_ids:
+            u = await s.get(User, uid)
+            if u and u.first_name and u.first_name.strip():
+                result[uid] = u.first_name.strip()
+                continue
+            # Нет имени в БД — пробуем Telegram
+            try:
+                chat = await bot.get_chat(uid)
+                fn = (chat.first_name or "").strip()
+                un = (chat.username or "").strip()
+                if fn:
+                    result[uid] = fn
+                elif un:
+                    result[uid] = "@" + un
+                else:
+                    result[uid] = f"Игрок {uid}"
+                # Сохраняем в БД
+                if u is None:
+                    s.add(User(id=uid, first_name=fn or None, username=un or None))
+                else:
+                    if fn: u.first_name = fn
+                    if un: u.username = un
+            except Exception as e:
+                logging.warning("get_chat(%s) failed: %s", uid, e)
+                if u and u.username and u.username.strip():
+                    result[uid] = "@" + u.username.strip()
+                else:
+                    result[uid] = f"Игрок {uid}"
+        await s.commit()
+    return result
 
 
 def reply_main_menu(user_id, is_admin):
@@ -829,6 +868,13 @@ async def cb_join_tournament(cb: CallbackQuery):
         else:
             s.add(Participant(tournament_id=tid, user_id=cb.from_user.id,
                               status="approved", chips=t.start_stack))
+        # Обновим данные пользователя
+        u = await s.get(User, cb.from_user.id)
+        if u is None:
+            s.add(User(id=cb.from_user.id, username=cb.from_user.username,
+                       first_name=cb.from_user.first_name))
+        else:
+            u.username = cb.from_user.username; u.first_name = cb.from_user.first_name
         await s.commit()
     await cb.answer("✅ Вступили!", show_alert=True)
     await _show_tournament_menu(cb, tid)
@@ -904,15 +950,25 @@ async def _start_tournament(bot, tid, notify=False):
             Participant.tournament_id == tid, Participant.status == "approved"))
         parts = r.scalars().all()
         if len(parts) < 2: return False
+        uids = [p.user_id for p in parts]
+
+    # Обогащаем имена из Telegram (для тех, у кого нет данных в БД)
+    names = await _enrich_names(bot, uids)
+
+    async with SessionLocal() as s:
+        t = await s.get(Tournament, tid)
+        if not t: return False
         players = []
         for p in parts:
-            u = await s.get(User, p.user_id)
-            players.append({"user_id": p.user_id, "name": _display_name(u, p.user_id)})
-            p.chips = t.start_stack
+            players.append({"user_id": p.user_id, "name": names.get(p.user_id, f"Игрок {p.user_id}")})
+            # Обновим chips у Participant
+            pp = await s.get(Participant, p.id)
+            if pp: pp.chips = t.start_stack
         t.status = "running"; t.auto_start_at = None
         await s.commit()
         tname, tgame, tprize = t.name, t.game_type, t.prize
         tstack, tturn, tblind = t.start_stack, t.turn_time, t.blind_interval
+
     if tgame == "poker":
         g = PokerGame(tid, players, start_stack=tstack, turn_time=tturn, blind_interval=tblind)
         gm.set_poker(tid, g); g.start_hand()
@@ -1099,6 +1155,13 @@ async def cb_apply(cb: CallbackQuery):
     async with SessionLocal() as s:
         t = await s.get(Tournament, tid)
         if not t: await cb.answer("Нет", show_alert=True); return
+        # Обновляем User из Telegram
+        u = await s.get(User, cb.from_user.id)
+        if u is None:
+            s.add(User(id=cb.from_user.id, username=cb.from_user.username,
+                       first_name=cb.from_user.first_name))
+        else:
+            u.username = cb.from_user.username; u.first_name = cb.from_user.first_name
         r = await s.execute(select(Participant).where(
             Participant.tournament_id == tid, Participant.user_id == cb.from_user.id))
         existing = r.scalar_one_or_none()
@@ -1112,8 +1175,9 @@ async def cb_apply(cb: CallbackQuery):
     try:
         await cb.bot.send_message(creator_id,
             f"<b>📩 Новая заявка!</b>\n{SEP}\n"
-            f"👤 @{cb.from_user.username or cb.from_user.first_name} "
-            f"(<code>{cb.from_user.id}</code>)\n🏆 <b>{esc(tname)}</b>",
+            f"👤 {esc(cb.from_user.first_name)} "
+            f"(@{cb.from_user.username or '—'}, <code>{cb.from_user.id}</code>)\n"
+            f"🏆 <b>{esc(tname)}</b>",
             reply_markup=join_request_kb(pid))
     except: pass
     await cb.answer("Отправлена!", show_alert=True)
@@ -1177,7 +1241,15 @@ async def cb_accept_inv(cb: CallbackQuery):
             Participant.tournament_id == tid, Participant.user_id == cb.from_user.id))
         p = r.scalar_one_or_none(); t = await s.get(Tournament, tid)
         if not p or not t: await cb.answer("Не найдено", show_alert=True); return
-        p.status = "approved"; await s.commit()
+        p.status = "approved"
+        # Обновим данные юзера
+        u = await s.get(User, cb.from_user.id)
+        if u is None:
+            s.add(User(id=cb.from_user.id, username=cb.from_user.username,
+                       first_name=cb.from_user.first_name))
+        else:
+            u.username = cb.from_user.username; u.first_name = cb.from_user.first_name
+        await s.commit()
         tname = t.name
     await cb.message.edit_text(f"<b>✅ Принято!</b>\n{SEP}\n🏆 <code>{esc(tname)}</code>")
     await cb.answer("Принято")
