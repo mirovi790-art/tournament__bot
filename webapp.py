@@ -23,11 +23,42 @@ def _esc(s): return html.escape(s or "")
 
 
 def _display_name(u, uid):
-    """Возвращает человекочитаемое имя. Приоритет: first_name → @username → Игрок #id."""
+    """Имя: first_name → @username → Игрок #id."""
     if u:
-        if u.first_name: return u.first_name
-        if u.username: return "@" + u.username
+        if u.first_name and u.first_name.strip(): return u.first_name.strip()
+        if u.username and u.username.strip(): return "@" + u.username.strip()
     return f"Игрок {uid}"
+
+
+async def _enrich_names(bot, user_ids):
+    """Для uid без имени запрашивает Telegram и сохраняет в БД."""
+    result = {}
+    async with SessionLocal() as s:
+        for uid in user_ids:
+            u = await s.get(User, uid)
+            if u and u.first_name and u.first_name.strip():
+                result[uid] = u.first_name.strip()
+                continue
+            try:
+                chat = await bot.get_chat(uid)
+                fn = (chat.first_name or "").strip()
+                un = (chat.username or "").strip()
+                if fn: result[uid] = fn
+                elif un: result[uid] = "@" + un
+                else: result[uid] = f"Игрок {uid}"
+                if u is None:
+                    s.add(User(id=uid, first_name=fn or None, username=un or None))
+                else:
+                    if fn: u.first_name = fn
+                    if un: u.username = un
+            except Exception as e:
+                logging.warning("get_chat(%s) failed: %s", uid, e)
+                if u and u.username and u.username.strip():
+                    result[uid] = "@" + u.username.strip()
+                else:
+                    result[uid] = f"Игрок {uid}"
+        await s.commit()
+    return result
 
 
 def validate_init_data(init_data):
@@ -47,16 +78,17 @@ def validate_init_data(init_data):
         return None
 
 
-async def _waiting_state(tid, t, user_id):
+async def _waiting_state(bot, tid, t, user_id):
     async with SessionLocal() as s:
         r = await s.execute(select(Participant).where(
             Participant.tournament_id == tid,
             Participant.status.in_(("approved", "winner"))))
         parts = r.scalars().all()
-        players_info = []
-        for p in parts:
-            u = await s.get(User, p.user_id)
-            players_info.append({"user_id": p.user_id, "name": _display_name(u, p.user_id)})
+        uids = [p.user_id for p in parts]
+    # Обогащаем имена
+    names = await _enrich_names(bot, uids)
+    players_info = [{"user_id": uid, "name": names.get(uid, f"Игрок {uid}")} for uid in uids]
+
     if t.game_type == "poker":
         return {"type": "poker_state", "tid": tid, "table_id": 0, "table_count": 1,
                 "phase": "waiting", "pot": 0, "community": [], "current_bet": 0,
@@ -101,6 +133,10 @@ def create_app(bot):
                 u = User(id=user_id, username=u_obj.get("username"),
                          first_name=u_obj.get("first_name"))
                 s.add(u); await s.commit()
+            else:
+                if u_obj.get("first_name"): u.first_name = u_obj.get("first_name")
+                if u_obj.get("username"): u.username = u_obj.get("username")
+                await s.commit()
             wins = (await s.execute(select(func.count()).select_from(Participant)
                 .where(Participant.user_id == user_id,
                        Participant.status == "winner"))).scalar() or 0
@@ -164,11 +200,10 @@ def create_app(bot):
                            first_name=parsed.get("user_obj", {}).get("first_name")))
                 await s.commit()
             else:
-                # Обновляем данные на случай изменений в Telegram
                 new_fn = parsed.get("user_obj", {}).get("first_name")
                 new_un = parsed.get("user_obj", {}).get("username")
-                if new_fn and u.first_name != new_fn: u.first_name = new_fn
-                if new_un and u.username != new_un: u.username = new_un
+                if new_fn: u.first_name = new_fn
+                if new_un: u.username = new_un
                 await s.commit()
             t = await s.get(Tournament, tid)
             if not t: await websocket.close(code=4004); return
@@ -192,7 +227,7 @@ def create_app(bot):
             g = gm.get_wheel(tid)
             if g: state = g.to_dict()
         if not state:
-            state = await _waiting_state(tid, t, user_id)
+            state = await _waiting_state(bot, tid, t, user_id)
         try: await websocket.send_json(state)
         except Exception: pass
         try:
