@@ -60,6 +60,14 @@ async def _upsert_user(fu):
         await s.commit()
 
 
+def _display_name(u, uid):
+    """Имя игрока: first_name → @username → Игрок #id."""
+    if u:
+        if u.first_name: return u.first_name
+        if u.username: return "@" + u.username
+    return f"Игрок {uid}"
+
+
 def reply_main_menu(user_id, is_admin):
     rows = [[KeyboardButton(text="🏆 Турниры")], [KeyboardButton(text="👤 Профиль")]]
     if is_admin: rows.append([KeyboardButton(text="🆕 Создать турнир")])
@@ -899,8 +907,7 @@ async def _start_tournament(bot, tid, notify=False):
         players = []
         for p in parts:
             u = await s.get(User, p.user_id)
-            players.append({"user_id": p.user_id,
-                            "name": (u.first_name if u and u.first_name else str(p.user_id))})
+            players.append({"user_id": p.user_id, "name": _display_name(u, p.user_id)})
             p.chips = t.start_stack
         t.status = "running"; t.auto_start_at = None
         await s.commit()
@@ -1189,7 +1196,6 @@ async def cb_decline_inv(cb: CallbackQuery):
 
 # ============ ФИНАЛИЗАЦИЯ ============
 async def _notify_tournament_ended(bot, tname, tprize, winner_id, winner_name, manual, user_ids, total):
-    """Фоновая рассылка с задержкой 7 сек."""
     await asyncio.sleep(7)
     for uid in user_ids:
         try:
@@ -1238,7 +1244,6 @@ async def _finalize_tournament(bot, tid, winner_id=None, winner_name=None, manua
         user_ids = [p.user_id for p in parts]
         await s.commit()
 
-    # Broadcast в Mini App — сразу
     try:
         await gm.broadcast(tid, {
             "type": "tournament_ended", "tid": tid,
@@ -1249,7 +1254,6 @@ async def _finalize_tournament(bot, tid, winner_id=None, winner_name=None, manua
     except Exception as e:
         logging.exception("broadcast final fail: %s", e)
 
-    # Рассылка в бота — через 7 сек (фоном, не блокируя тикер)
     asyncio.create_task(_notify_tournament_ended(
         bot, tname, tprize, winner_id, winner_name, manual, user_ids, total))
 
