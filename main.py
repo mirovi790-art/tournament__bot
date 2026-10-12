@@ -14,7 +14,7 @@ from aiogram.types import (Message, CallbackQuery, InlineKeyboardMarkup,
                             InlineKeyboardButton, WebAppInfo,
                             ReplyKeyboardMarkup, KeyboardButton)
 from dotenv import load_dotenv
-from sqlalchemy import select
+from sqlalchemy import select, func
 
 from database import (init_db, SessionLocal, User, Admin, Ban, Tournament,
                        Participant)
@@ -63,7 +63,9 @@ async def _upsert_user(fu):
 def reply_main_menu(user_id, is_admin):
     rows = [[KeyboardButton(text="🏆 Турниры")], [KeyboardButton(text="👤 Профиль")]]
     if is_admin: rows.append([KeyboardButton(text="🆕 Создать турнир")])
-    if user_id == OWNER_ID: rows.append([KeyboardButton(text="👑 Админство")])
+    if user_id == OWNER_ID:
+        rows.append([KeyboardButton(text="👑 Админство")])
+        rows.append([KeyboardButton(text="🔍 Найти игрока")])
     rows.append([KeyboardButton(text="ℹ️ Помощь")])
     return ReplyKeyboardMarkup(keyboard=rows, resize_keyboard=True)
 
@@ -175,6 +177,10 @@ class InviteFSM(StatesGroup):
     user_id = State()
 
 
+class FindPlayerFSM(StatesGroup):
+    query = State()
+
+
 def _help_text():
     return ("<b>ℹ️ ПОМОЩЬ И ПРАВИЛА</b>\n" f"{SEP}\n"
             "<b>🃏 Покер:</b>\n▫️ До 7 игроков за столом.\n▫️ >7 — несколько столов.\n\n"
@@ -267,6 +273,99 @@ async def txt_adm_owner(message: Message):
     if message.from_user.id != OWNER_ID:
         await message.answer("⛔ Владелец."); return
     await message.answer(f"<b>👑 АДМИНСТВО</b>\n{SEP}", reply_markup=owner_menu_kb())
+
+
+@router.message(StateFilter(None), F.text == "🔍 Найти игрока")
+async def txt_find_player(message: Message, state: FSMContext):
+    if message.from_user.id != OWNER_ID:
+        await message.answer("⛔ Только для владельца."); return
+    await state.clear()
+    await state.set_state(FindPlayerFSM.query)
+    await message.answer(
+        f"<b>🔍 ПОИСК ИГРОКА</b>\n{SEP}\n"
+        "Отправь <b>Telegram ID</b> или <b>@username</b> игрока.\n\n"
+        "<blockquote>Чтобы выйти — нажми ⬅️ В главное меню.</blockquote>",
+        reply_markup=ReplyKeyboardMarkup(
+            keyboard=[[KeyboardButton(text="⬅️ В главное меню")]],
+            resize_keyboard=True))
+
+
+@router.message(FindPlayerFSM.query)
+async def msg_find_player(message: Message, state: FSMContext):
+    if message.from_user.id != OWNER_ID: return
+    raw = message.text.strip()
+    if raw == "⬅️ В главное меню":
+        await state.clear()
+        is_adm = await _is_admin(message.from_user.id)
+        await message.answer("🏠 <b>Главное меню</b>",
+                             reply_markup=reply_main_menu(message.from_user.id, is_adm))
+        return
+    target_id = None
+    async with SessionLocal() as s:
+        if raw.startswith("@"):
+            r = await s.execute(select(User).where(User.username == raw[1:]))
+            u = r.scalar_one_or_none()
+            if u: target_id = u.id
+        else:
+            try: target_id = int(raw)
+            except ValueError: target_id = None
+        if target_id is None:
+            await message.answer(
+                "<blockquote>❌ Игрок не найден. Проверь ID/@username. "
+                "Он должен хотя бы раз запустить бота (/start).</blockquote>")
+            return
+        u = await s.get(User, target_id)
+        if not u:
+            await message.answer("<blockquote>❌ Игрок не найден в базе.</blockquote>")
+            return
+        # Статистика
+        wins = (await s.execute(select(func.count()).select_from(Participant)
+            .where(Participant.user_id == target_id,
+                   Participant.status == "winner"))).scalar() or 0
+        total_participated = (await s.execute(select(func.count()).select_from(Participant)
+            .where(Participant.user_id == target_id,
+                   Participant.status.in_(("approved", "winner"))))).scalar() or 0
+        is_adm_db = (await s.execute(select(Admin).where(
+            Admin.user_id == target_id))).scalar_one_or_none() is not None
+        is_banned = (await s.get(Ban, target_id)) is not None
+        active_parts = (await s.execute(select(Participant).where(
+            Participant.user_id == target_id,
+            Participant.status.in_(("approved", "winner"))))).scalars().all()
+        active_tours = []
+        for p in active_parts:
+            t = await s.get(Tournament, p.tournament_id)
+            if t and t.status in ("registration", "running", "paused"):
+                active_tours.append({"name": t.name, "status": t.status, "game": t.game_type})
+    if target_id == OWNER_ID:
+        role = "👑 Создатель"
+    elif is_adm_db:
+        role = "🛠 Администратор"
+    else:
+        role = "🎮 Игрок"
+    ban_label = "🚫 ЗАБАНЕН" if is_banned else "✅ Активен"
+    uname = f"@{u.username}" if u.username else "—"
+    lines = [
+        "<b>🔍 ПРОФИЛЬ ИГРОКА</b>", SEP,
+        f"🆔 <b>ID:</b> <code>{target_id}</code>",
+        f"👤 <b>Имя:</b> {esc(u.first_name or '—')}",
+        f"🌐 <b>Username:</b> {uname}",
+        f"🎭 <b>Роль:</b> {role}",
+        f"📊 <b>Статус:</b> {ban_label}",
+        SEP,
+        f"🏆 <b>Побед:</b> <code>{wins}</code>",
+        f"🎮 <b>Участий:</b> <code>{total_participated}</code>",
+        f"📅 <b>В боте с:</b> {u.created_at:%d.%m.%Y}",
+    ]
+    if active_tours:
+        lines.append(SEP)
+        lines.append("<b>⚡ Активные турниры:</b>")
+        for t in active_tours:
+            em = "🃏" if t["game"] == "poker" else "🎡"
+            lines.append(f"  {em} {esc(t['name'])} · <code>{t['status']}</code>")
+    lines.append("")
+    lines.append("<blockquote>Можешь ввести ещё игрока или нажать ⬅️</blockquote>")
+    await message.answer("\n".join(lines))
+    # остаёмся в том же FSM, чтобы можно было искать ещё
 
 
 @router.message(StateFilter(None), F.text == "ℹ️ Помощь")
@@ -764,7 +863,6 @@ async def cb_end_confirm(cb: CallbackQuery):
     tid = int(cb.data.split("_")[-1])
     gm._active_poker.pop(tid, None); gm._active_wheel.pop(tid, None)
     _finalized_tids.discard(tid)
-    # РУЧНОЕ завершение → победа НЕ засчитывается
     await _finalize_tournament(cb.bot, tid, manual=True)
     await cb.answer("Завершено", show_alert=True)
     await cb.message.edit_text(f"<b>🏁 Завершён вручную</b>\n{SEP}\nID: <code>{tid}</code>")
@@ -1091,17 +1189,13 @@ async def cb_decline_inv(cb: CallbackQuery):
     await cb.message.edit_text("<blockquote>❌ Отклонено.</blockquote>"); await cb.answer()
 
 
-# ============ ФИНАЛИЗАЦИЯ (главное!) ============
+# ============ ФИНАЛИЗАЦИЯ ============
 async def _finalize_tournament(bot, tid, winner_id=None, winner_name=None, manual=False):
-    """Авто-финал (manual=False): засчитывает победу + уведомления с победителем.
-       Ручное (manual=True): НЕ засчитывает победу + уведомление 'остановлен админом'."""
     async with SessionLocal() as s:
         t = await s.get(Tournament, tid)
-        if not t or t.status == "finished":
-            return
+        if not t or t.status == "finished": return
         t.status = "finished"
         tname = t.name; tprize = t.prize or "—"
-        # Засчитываем победу ТОЛЬКО при авто-финале
         if not manual and winner_id:
             u = await s.get(User, winner_id)
             if u:
@@ -1116,7 +1210,6 @@ async def _finalize_tournament(bot, tid, winner_id=None, winner_name=None, manua
         total = len(parts)
         await s.commit()
 
-    # Broadcast в Mini App
     try:
         await gm.broadcast(tid, {
             "type": "tournament_ended", "tid": tid,
@@ -1127,7 +1220,6 @@ async def _finalize_tournament(bot, tid, winner_id=None, winner_name=None, manua
     except Exception as e:
         logging.exception("broadcast final fail: %s", e)
 
-    # Уведомления в бота
     for p in parts:
         try:
             if manual:
@@ -1157,7 +1249,6 @@ async def _finalize_tournament(bot, tid, winner_id=None, winner_name=None, manua
 async def game_ticker(bot):
     while True:
         try:
-            # авто-старт
             async with SessionLocal() as s:
                 now = datetime.utcnow()
                 r = await s.execute(select(Tournament).where(
@@ -1169,7 +1260,6 @@ async def game_ticker(bot):
                         tid = t.id; break
             if tid: await _start_tournament(bot, tid, notify=True)
 
-            # покер — авто-финал
             for tid, g in list(gm._active_poker.items()):
                 if getattr(g, "finished", False):
                     if tid not in _finalized_tids:
@@ -1193,7 +1283,6 @@ async def game_ticker(bot):
                 if changed:
                     await gm.broadcast(tid, g.to_dict())
 
-            # колесо — авто-финал
             for tid, g in list(gm._active_wheel.items()):
                 if g.finished and tid not in _finalized_tids:
                     _finalized_tids.add(tid)
