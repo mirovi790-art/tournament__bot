@@ -177,7 +177,7 @@ def enter_webapp_kb(tid, url):
 def manage_tournament_kb(tid, status, game_type=None):
     rows = [[InlineKeyboardButton(text="🎮 Открыть Mini App",
                                   web_app=WebAppInfo(url=f"{WEBAPP_URL}/?tid={tid}"))]]
-    if game_type in ("wheel", "wheel_1v1") and status in ("running", "paused"):
+    if game_type in ("wheel", "wheel_1v1") and status == "running":
         rows.append([InlineKeyboardButton(text="🎡 Крутить колесо", callback_data=f"tt_spin_{tid}")])
     if status == "registration":
         if game_type != "wheel_1v1":
@@ -189,7 +189,6 @@ def manage_tournament_kb(tid, status, game_type=None):
     if status == "running":
         if game_type != "wheel_1v1":
             rows.append([InlineKeyboardButton(text="🖐 Вступить в турнир", callback_data=f"tt_join_{tid}")])
-        rows.append([InlineKeyboardButton(text="⏸ Пауза", callback_data=f"tt_pause_{tid}")])
         if game_type != "wheel_1v1":
             rows.append([InlineKeyboardButton(text="✉️ Пригласить игрока", callback_data=f"tt_invite_{tid}")])
         rows.append([InlineKeyboardButton(text="🏁 Закончить турнир", callback_data=f"tt_end_{tid}")])
@@ -839,7 +838,6 @@ async def tt_confirm(cb: CallbackQuery, state: FSMContext):
     data = await state.get_data()
     game_type = data["game_type"]
 
-    # ============ 1×1 ============
     if game_type == "wheel_1v1":
         p1_id = data["w1v1_p1_id"]; p2_id = data["w1v1_p2_id"]
         async with SessionLocal() as s:
@@ -852,13 +850,11 @@ async def tt_confirm(cb: CallbackQuery, state: FSMContext):
                            prize=data.get("prize"),
                            status="registration")
             s.add(t); await s.commit(); await s.refresh(t); tid = t.id
-            # Оба участника — pending, ждём принятия
             s.add(Participant(tournament_id=tid, user_id=p1_id, status="pending"))
             s.add(Participant(tournament_id=tid, user_id=p2_id, status="pending"))
             await s.commit()
         await state.clear()
         await cb.answer("⚔️ Приглашения отправлены")
-        # Отправляем приглашения ОБОИМ игрокам
         for uid in (p1_id, p2_id):
             try:
                 await cb.bot.send_message(uid,
@@ -873,7 +869,6 @@ async def tt_confirm(cb: CallbackQuery, state: FSMContext):
         await _show_tournament_menu(cb, tid)
         return
 
-    # ============ Обычный турнир ============
     async with SessionLocal() as s:
         t = Tournament(name=data["name"], access_type=data["access_type"],
                        game_type=game_type, creator_id=cb.from_user.id,
@@ -1131,22 +1126,13 @@ async def _start_tournament(bot, tid, notify=False):
 
 @router.callback_query(F.data.startswith("tt_pause_"))
 async def cb_pause(cb: CallbackQuery):
-    tid = int(cb.data.split("_")[-1])
-    async with SessionLocal() as s:
-        t = await s.get(Tournament, tid)
-        if t: t.status = "paused"; await s.commit()
-    await gm.broadcast(tid, {"type": "tournament_paused", "tid": tid})
-    await cb.answer("Пауза"); await _show_tournament_menu(cb, tid)
+    # Убрано из UI, но оставлено на случай старых callback'ов
+    await cb.answer("Пауза отключена", show_alert=True)
 
 
 @router.callback_query(F.data.startswith("tt_resume_"))
 async def cb_resume(cb: CallbackQuery):
-    tid = int(cb.data.split("_")[-1])
-    async with SessionLocal() as s:
-        t = await s.get(Tournament, tid)
-        if t: t.status = "running"; await s.commit()
-    await gm.broadcast(tid, {"type": "tournament_resumed", "tid": tid})
-    await cb.answer("Продолжено"); await _show_tournament_menu(cb, tid)
+    await cb.answer("Пауза отключена", show_alert=True)
 
 
 @router.callback_query(F.data.startswith("tt_cancel_"))
@@ -1357,7 +1343,6 @@ async def cb_reject(cb: CallbackQuery):
     await cb.message.edit_text(f"<b>❌ Отклонён</b>"); await cb.answer("Отклонено")
 
 
-# ============ ПРИНЯТИЕ ПРИГЛАШЕНИЯ ============
 @router.callback_query(F.data.startswith("accept_invite_"))
 async def cb_accept_inv(cb: CallbackQuery):
     tid = int(cb.data.split("_")[-1])
@@ -1376,7 +1361,6 @@ async def cb_accept_inv(cb: CallbackQuery):
         if p.status == "approved":
             await cb.answer("Вы уже приняли", show_alert=True); return
         p.status = "approved"
-        # Обновляем данные юзера
         u = await s.get(User, cb.from_user.id)
         if u is None:
             s.add(User(id=cb.from_user.id, username=cb.from_user.username,
@@ -1385,15 +1369,12 @@ async def cb_accept_inv(cb: CallbackQuery):
             u.username = cb.from_user.username; u.first_name = cb.from_user.first_name
         await s.commit()
         tname = t.name; tprize = t.prize
-
-        # Проверяем для 1v1: если оба approved → запускаем игру
         if t.game_type == "wheel_1v1":
             r = await s.execute(select(Participant).where(
                 Participant.tournament_id == tid))
             all_p = r.scalars().all()
             approved = [x for x in all_p if x.status == "approved"]
             if len(approved) >= 2:
-                # Оба приняли — стартуем!
                 start_now = True
                 for pp in approved[:2]:
                     uu = await s.get(User, pp.user_id)
@@ -1403,21 +1384,16 @@ async def cb_accept_inv(cb: CallbackQuery):
                     })
                 t.status = "running"
                 await s.commit()
-
-    # Редактируем сообщение приглашения
     try:
         await cb.message.edit_text(
             f"<b>✅ Вы приняли приглашение!</b>\n{SEP}\n🏆 <code>{esc(tname)}</code>\n\n"
             "<blockquote>Ждём второго игрока...</blockquote>")
     except: pass
     await cb.answer("Принято!")
-
-    # Запуск игры 1v1
     if start_now and len(players_for_game) == 2:
         g = Wheel1v1Game(tid, players_for_game[0], players_for_game[1], tprize or "🏆 Приз")
         gm.set_wheel_1v1(tid, g)
         await gm.broadcast(tid, {"type": "wheel_1v1_ready"})
-        # Уведомляем обоих игроков
         for pl in players_for_game:
             try:
                 await cb.bot.send_message(pl["user_id"],
@@ -1450,7 +1426,6 @@ async def cb_decline_inv(cb: CallbackQuery):
     except: pass
     await cb.answer("Отклонено")
     if cancel_tour:
-        # Уведомляем второго игрока, что турнир отменён
         async with SessionLocal() as s:
             r = await s.execute(select(Participant).where(
                 Participant.tournament_id == tid))
