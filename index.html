@@ -77,6 +77,7 @@ html,body{margin:0;padding:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe
 .duel-side{flex:1;text-align:center;padding:8px;}
 .duel-side .ava{font-size:44px;margin-bottom:6px;filter:drop-shadow(0 0 12px rgba(255,255,255,.3));}
 .duel-side .nm{font-weight:800;font-size:15px;color:#fef3c7;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-bottom:6px;}
+.duel-side .score-big{font-size:26px;font-weight:900;color:#fbbf24;text-shadow:0 0 16px rgba(251,191,36,.6);margin:2px 0 4px;}
 .duel-side .status-tag{display:inline-block;padding:4px 10px;border-radius:999px;font-size:11px;font-weight:800;}
 .duel-side .status-tag.notready{background:#7f1d1d;color:#fecaca;}
 .duel-side .status-tag.ready{background:#065f46;color:#d1fae5;box-shadow:0 0 12px rgba(34,197,94,.6);}
@@ -88,6 +89,14 @@ html,body{margin:0;padding:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe
 .ready-btn button:disabled{background:#334155;box-shadow:none;color:#94a3b8;}
 .ready-btn button.pressed{background:linear-gradient(135deg,#065f46,#065f46);cursor:default;}
 .waiting-info{text-align:center;color:#94a3b8;font-size:14px;padding:10px;}
+.presence{margin:0 14px 14px;background:rgba(15,23,42,.7);border:1px solid rgba(124,58,237,.35);border-radius:12px;padding:10px 12px;}
+.presence h4{margin:0 0 8px;font-size:12px;font-weight:800;color:#a78bfa;letter-spacing:1px;text-transform:uppercase;}
+.presence-list{display:flex;flex-wrap:wrap;gap:6px;}
+.presence-item{display:inline-flex;align-items:center;gap:5px;background:#1e293b;border-radius:999px;padding:4px 10px;font-size:12px;color:#cbd5e1;border:1px solid #334155;}
+.presence-item.player{border-color:#22c55e;color:#d1fae5;background:rgba(34,197,94,.12);}
+.presence-item.admin{border-color:#f59e0b;color:#fef3c7;background:rgba(245,158,11,.12);}
+.presence-item.creator{border-color:#a855f7;color:#f3e8ff;background:rgba(168,85,247,.12);}
+.presence-item.spectator{opacity:.85;}
 .table-wrap{padding:8px;display:flex;justify-content:center;align-items:center;}
 .table-felt{position:relative;width:100%;max-width:520px;aspect-ratio:4/5;border-radius:50%/40%;background:radial-gradient(ellipse at center,#16a34a 0%,#065f46 100%);border:10px solid #b45309;box-shadow:inset 0 0 80px rgba(0,0,0,.3),0 0 40px rgba(251,191,36,.3);display:flex;align-items:center;justify-content:center;}
 .pot{position:absolute;top:6%;left:50%;transform:translateX(-50%);background:linear-gradient(135deg,#facc15,#f59e0b);padding:8px 20px;border-radius:999px;font-weight:900;color:#422006;font-size:15px;box-shadow:0 4px 12px rgba(0,0,0,.5);}
@@ -154,7 +163,7 @@ html,body{margin:0;padding:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe
 .bracket-player.winner{background:linear-gradient(90deg,rgba(251,191,36,.25),rgba(15,23,42,.8));border:1px solid rgba(251,191,36,.5);}
 .bracket-player.winner .bp-name{color:#fbbf24;font-weight:900;}
 .bracket-player.loser .bp-name{color:#94a3b8;text-decoration:line-through;opacity:.6;}
-.bracket-score{font-size:11px;color:#fbbf24;font-weight:900;margin-left:4px;}
+.bracket-score{font-size:11px;color:#fbbf24;font-weight:900;margin-left:4px;background:rgba(251,191,36,.12);padding:1px 6px;border-radius:6px;}
 .bracket-check{flex-shrink:0;width:26px;height:26px;border-radius:6px;border:2px solid #475569;background:#1e293b;color:#64748b;cursor:pointer;display:flex;align-items:center;justify-content:center;font-weight:900;font-size:14px;transition:all .2s;}
 .bracket-check:disabled{cursor:default;opacity:.7;}
 .bracket-check.checked{background:linear-gradient(135deg,#16a34a,#22c55e);border-color:#22c55e;color:#fff;box-shadow:0 0 12px rgba(34,197,94,.7);}
@@ -268,6 +277,7 @@ let BRACKET_MATCH_VIEW_STATE = {};
 let BRACKET_MATCH_VIEW_TIMER = {};
 let BRACKET_MATCH_VIEW_ANIM = {};
 let BRACKET_MATCH_LAST_SPIN_SHOWN = {};
+let PRESENCE_TIMER = null;
 
 function show(el){el.classList.remove("hidden");}
 function hide(el){el.classList.add("hidden");}
@@ -424,6 +434,7 @@ async function openRoom(tid){
 
 function exitRoom(){
   stopAutoSpin(); clearExitTimer();
+  stopPresenceTimer();
   for(const mid in BRACKET_MATCH_VIEW_TIMER){ try{ clearTimeout(BRACKET_MATCH_VIEW_TIMER[mid]); }catch(e){} }
   for(const mid in BRACKET_MATCH_VIEW_ANIM){ try{ cancelAnimationFrame(BRACKET_MATCH_VIEW_ANIM[mid]); }catch(e){} }
   BRACKET_MATCH_VIEW_TIMER = {}; BRACKET_MATCH_VIEW_ANIM = {}; BRACKET_MATCH_VIEW_STATE = {};
@@ -469,11 +480,8 @@ function connectWS(tid){
     }
     else if(msg.type === "player_kicked" && msg.user_id === MY_ID){
       stopAutoSpin(); showModal("🚫 Исключение","Администратор удалил вас.",[]);
-      // Не выходим сразу — остаёмся как наблюдатель, если это bracket
       if(GAME_TYPE !== "bracket"){
         clearExitTimer(); EXIT_TIMER = setTimeout(()=>exitRoom(), 5000);
-      } else {
-        // Обновим "Выйти" — теперь мы просто наблюдатель
       }
     }
     else if(msg.type === "tournament_ended"){ handleTournamentEnded(msg); }
@@ -489,6 +497,20 @@ function connectWS(tid){
   };
 }
 function wsSend(o){ if(WS && WS.readyState===1) WS.send(JSON.stringify(o)); }
+
+function startPresenceTimer(match_id){
+  stopPresenceTimer();
+  const tick = () => {
+    if(ACTIVE_TID && BRACKET_ACTIVE_MATCH_ID === match_id && WS && WS.readyState===1){
+      wsSend({type:"bracket_presence", match_id});
+    }
+  };
+  tick();
+  PRESENCE_TIMER = setInterval(tick, 4000);
+}
+function stopPresenceTimer(){
+  if(PRESENCE_TIMER){ clearInterval(PRESENCE_TIMER); PRESENCE_TIMER = null; }
+}
 
 function handleTournamentEnded(msg){
   if((GAME_TYPE === 'wheel' || GAME_TYPE === 'wheel_1v1') && WHEEL_LOCK){
@@ -601,7 +623,6 @@ function drawBracketUI(s){
       html += `<div class="bracket-vs">VS</div>`;
       html += renderBracketPlayer(m, m.p2, m.ready, m.finished, m.winner, isMyMatch, m.p2_wins);
 
-      // Кнопки входа / наблюдения
       const canShowSpectate = !isMyMatch && m.p1 && m.p2;
       if(isMyMatch && !m.finished && m.p1 && m.p2){
         const roomActive = m.room_active;
@@ -615,7 +636,6 @@ function drawBracketUI(s){
         let dis = !bothReady && !roomActive;
         html += `<button class="bracket-enter-btn admin-view" data-enter="${m.match_id}" ${dis?"disabled":""}>${btnLabel}</button>`;
       } else if(canShowSpectate){
-        // Наблюдение (для выбывших / других игроков)
         const isRunning = m.room_ready && m.room_ready.length >= 2 && !m.finished;
         const isFinished = m.finished;
         let label = "👁 СМОТРЕТЬ";
@@ -651,13 +671,16 @@ function drawBracketUI(s){
       const mid = parseInt(btn.dataset.enter, 10);
       if(!mid || btn.disabled) return;
       BRACKET_ACTIVE_MATCH_ID = mid;
-      BRACKET_MATCH_VIEW_STATE[mid] = BRACKET_MATCH_VIEW_STATE[mid] || "idle";
-      // Инициализируем счётчик уже показанных спинов
+      BRACKET_MATCH_VIEW_STATE[mid] = "idle";
+      // Помечаем текущий спин как уже "просмотренный", чтобы не запускать старую анимацию
       if(LAST_STATE){
         const mm = findMatch(LAST_STATE, mid);
-        if(mm) BRACKET_MATCH_LAST_SPIN_SHOWN[mid] = mm.spin_count || 0;
+        BRACKET_MATCH_LAST_SPIN_SHOWN[mid] = mm ? (mm.spin_count || 0) : 0;
+      } else {
+        BRACKET_MATCH_LAST_SPIN_SHOWN[mid] = 0;
       }
       wsSend({type: "bracket_enter", match_id: mid});
+      startPresenceTimer(mid);
       if(LAST_STATE) renderBracketRoom(LAST_STATE, mid);
     });
   });
@@ -672,8 +695,9 @@ function renderBracketPlayer(m, p, readyList, finished, winner, isMyMatch, wins)
   const isLoser = finished && winner && winner.user_id !== p.user_id;
   const isMe = p.user_id === MY_ID;
   let cls = "bracket-player";
-  if(isWinner) cls += " winner";
-  else if(isLoser) cls += " loser";
+  // Подсветка "winner/loser" — ТОЛЬКО когда матч целиком завершён
+  if(finished && isWinner) cls += " winner";
+  else if(finished && isLoser) cls += " loser";
 
   let checkCls = "bracket-check";
   let checkText = "";
@@ -681,14 +705,16 @@ function renderBracketPlayer(m, p, readyList, finished, winner, isMyMatch, wins)
   if(isReady) { checkCls += " checked"; checkText = "✓"; }
   if(isMe && !finished && m.p1 && m.p2 && !isReady) disabled = "";
   if(isMe && isReady) disabled = "disabled";
-  if(isMyMatch === false) checkCls += " notmine";
   if(isMe) checkCls += " mine"; else checkCls += " notmine";
 
-  const scoreTag = (m.series_target && m.series_target > 1 && wins !== undefined)
-    ? `<span class="bracket-score">${wins}:${(m.p1_wins||0)+(m.p2_wins||0)-wins || 0}</span>` : "";
-  // Покажем персональный счёт игрока
-  const myWins = p && p.user_id === (m.p1 && m.p1.user_id) ? (m.p1_wins||0) : (m.p2_wins||0);
-  const scoreText = m.series_target && m.series_target > 1 ? `<span class="bracket-score">${myWins}</span>` : "";
+  // Счёт серии: только для этого игрока. Показываем, если матч уже имеет спины.
+  let scoreText = "";
+  if(m.series_target && m.series_target > 1){
+    const myWins = (p.user_id === (m.p1 && m.p1.user_id)) ? (m.p1_wins||0) : (m.p2_wins||0);
+    if(myWins > 0 || m.spin_count > 0){
+      scoreText = `<span class="bracket-score">${myWins}</span>`;
+    }
+  }
 
   return `<div class="${cls}">
     <div class="bp-name">${escapeHtml(p.name)}${isMe ? ' <span style="color:#fbbf24;">(вы)</span>' : ''}</div>
@@ -700,50 +726,53 @@ function renderBracketPlayer(m, p, readyList, finished, winner, isMyMatch, wins)
 /* ============= BRACKET ROOM ============= */
 function renderBracketRoom(s, match_id){
   const m = findMatch(s, match_id);
-  if(!m){ BRACKET_ACTIVE_MATCH_ID = null; drawBracketUI(s); return; }
+  if(!m){ BRACKET_ACTIVE_MATCH_ID = null; stopPresenceTimer(); drawBracketUI(s); return; }
 
-  // Уже анимируем — не трогаем
-  if(BRACKET_MATCH_VIEW_STATE[match_id] === "spinning") return;
-
+  const state = BRACKET_MATCH_VIEW_STATE[match_id] || "idle";
   const lastShown = BRACKET_MATCH_LAST_SPIN_SHOWN[match_id] || 0;
   const hasNewSpin = m.last_spin && m.spin_count > lastShown;
+
+  // Идёт анимация — не трогаем
+  if(state === "spinning") return;
+  // Показываем финальный/раундовый результат — тоже не трогаем
+  if(state === "result_round" || state === "result_final") return;
 
   if(hasNewSpin){
     BRACKET_MATCH_LAST_SPIN_SHOWN[match_id] = m.spin_count;
     BRACKET_MATCH_VIEW_STATE[match_id] = "spinning";
     clearBracketTimer(match_id);
     animateBracketSpin(s, m, () => {
-      BRACKET_MATCH_VIEW_STATE[match_id] = "result";
-      drawBracketRoomResult(m, s);
-      const delay = m.finished ? 7000 : 3500;
-      BRACKET_MATCH_VIEW_TIMER[match_id] = setTimeout(() => {
-        BRACKET_MATCH_VIEW_STATE[match_id] = "idle";
-        if(m.finished){
-          if(m.winner && m.winner.user_id === MY_ID){
-            BRACKET_ACTIVE_MATCH_ID = null;
-            if(LAST_STATE) drawBracketUI(LAST_STATE);
-          } else if(m.loser && m.loser.user_id === MY_ID){
-            // Проигравший — остаёмся в турнире как наблюдатель, возвращаемся к сетке
-            BRACKET_ACTIVE_MATCH_ID = null;
-            if(LAST_STATE) drawBracketUI(LAST_STATE);
-          } else {
-            BRACKET_ACTIVE_MATCH_ID = null;
-            if(LAST_STATE) drawBracketUI(LAST_STATE);
-          }
-        } else if(LAST_STATE){
-          renderBracketRoom(LAST_STATE, match_id);
-        }
-      }, delay);
+      if(m.finished){
+        // Финальный спин серии → финальный результат, потом уходим
+        BRACKET_MATCH_VIEW_STATE[match_id] = "result_final";
+        drawBracketRoomFinalResult(m);
+        BRACKET_MATCH_VIEW_TIMER[match_id] = setTimeout(() => {
+          BRACKET_MATCH_VIEW_STATE[match_id] = "idle";
+          BRACKET_ACTIVE_MATCH_ID = null;
+          stopPresenceTimer();
+          if(LAST_STATE) drawBracketUI(LAST_STATE);
+        }, 7000);
+      } else {
+        // Промежуточная победа в серии → короткий результат, потом ждём следующий спин
+        BRACKET_MATCH_VIEW_STATE[match_id] = "result_round";
+        drawBracketRoomRoundResult(m);
+        BRACKET_MATCH_VIEW_TIMER[match_id] = setTimeout(() => {
+          BRACKET_MATCH_VIEW_STATE[match_id] = "idle";
+          if(LAST_STATE) renderBracketRoom(LAST_STATE, match_id);
+        }, 3500);
+      }
     });
     return;
   }
 
-  // Уже завершён и спин уже показывали → просто результат
-  if(m.finished && lastShown > 0){
-    drawBracketRoomResult(m, s);
+  // Матч уже завершён, а мы зашли как наблюдатель — показываем финал сразу
+  if(m.finished){
+    BRACKET_MATCH_VIEW_STATE[match_id] = "result_final";
+    drawBracketRoomFinalResult(m);
     return;
   }
 
+  // Обычная комната: ждём / готовы / серия в процессе
   drawBracketRoomWaiting(s, m);
 }
 
@@ -752,6 +781,19 @@ function clearBracketTimer(match_id){
     try{ clearTimeout(BRACKET_MATCH_VIEW_TIMER[match_id]); }catch(e){}
     BRACKET_MATCH_VIEW_TIMER[match_id] = null;
   }
+}
+
+function _presenceHtml(m){
+  const list = m.room_presence || [];
+  if(!list.length) return "";
+  const icon = {"player":"🎮","admin":"🛠","creator":"👑","spectator":"👁"};
+  const label = {"player":"Игрок","admin":"Админ","creator":"Создатель","spectator":"Наблюдатель"};
+  const items = list.map(p => {
+    const cls = p.role || "spectator";
+    const isMe = p.user_id === MY_ID;
+    return `<span class="presence-item ${cls}">${icon[cls]||"👤"} ${escapeHtml(p.name)}${isMe?" (вы)":""} · <i>${label[cls]||"?"}</i></span>`;
+  }).join("");
+  return `<div class="presence"><h4>Кто в комнате (${list.length})</h4><div class="presence-list">${items}</div></div>`;
 }
 
 function drawBracketRoomWaiting(s, m){
@@ -768,36 +810,38 @@ function drawBracketRoomWaiting(s, m){
 
   els.rmCounter.textContent = `🏆 ${roundName} · матч ${m.pos_in_round + 1}`;
 
-  const scoreLine = m.series_target && m.series_target > 1
-    ? `<div style="text-align:center;color:#fbbf24;font-size:13px;font-weight:800;margin-top:6px;">Счёт в серии: <b>${m.p1_wins||0}:${m.p2_wins||0}</b> · до ${m.series_target} побед</div>`
-    : "";
+  const p1w = m.p1_wins||0, p2w = m.p2_wins||0;
+  const target = m.series_target || 3;
 
   let html = `<div class="duel-wrap">
     <div style="text-align:center;color:#94a3b8;font-size:12px;letter-spacing:1px;text-transform:uppercase;font-weight:800;">${escapeHtml(roundName)}</div>
-    ${scoreLine}
+    <div style="text-align:center;color:#fbbf24;font-size:13px;font-weight:800;">Серия до ${target} побед · Счёт <b>${p1w}:${p2w}</b></div>
     <div class="duel-vs">
       <div class="duel-side">
         <div class="ava">${p1?.user_id === MY_ID ? '🙋' : '👤'}</div>
         <div class="nm">${escapeHtml(p1?.name || '—')}</div>
+        <div class="score-big">${p1w}</div>
         <div class="status-tag ${p1RoomReady ? 'ready' : 'notready'}">${p1RoomReady ? '✅ Готов' : '⏳ Не готов'}</div>
       </div>
       <div class="duel-vs-mid">VS</div>
       <div class="duel-side">
         <div class="ava">${p2?.user_id === MY_ID ? '🙋' : '👤'}</div>
         <div class="nm">${escapeHtml(p2?.name || '—')}</div>
+        <div class="score-big">${p2w}</div>
         <div class="status-tag ${p2RoomReady ? 'ready' : 'notready'}">${p2RoomReady ? '✅ Готов' : '⏳ Не готов'}</div>
       </div>
     </div>
+    ${_presenceHtml(m)}
     <div class="wheel-stage"><div class="pointer"></div><canvas id="wheel" width="640" height="640"></canvas></div>`;
 
   if(iAmPlayer && !myRoomReady){
     html += `<div class="ready-btn"><button id="bracket-room-ready">🤝 ГОТОВ</button></div>`;
   } else if(iAmPlayer && myRoomReady){
-    html += `<div class="ready-btn"><button class="pressed" disabled>✅ ВЫ ГОТОВЫ</button></div>`;
+    html += `<div class="ready-btn"><button class="pressed" disabled>✅ ВЫ ГОТОВЫ · ЖДЁМ СЛЕДУЮЩИЙ СПИН</button></div>`;
   } else if(!iAmPlayer){
     html += `<div class="waiting-info">👁 Вы наблюдаете за матчем.</div>`;
   }
-  html += `<div class="waiting-info">${(!p1RoomReady || !p2RoomReady) ? 'Оба игрока должны нажать «Готов» — и колесо решит исход.' : '🎲 Колесо крутится…'}</div>`;
+  html += `<div class="waiting-info">${(!p1RoomReady || !p2RoomReady) ? 'Оба игрока должны нажать «Готов» — серия начнётся автоматически.' : '🎲 Колесо крутится…'}</div>`;
   html += `<div style="text-align:center;padding:10px;"><button class="btn" id="bracket-back" style="background:#334155;">⬅️ К сетке</button></div>`;
   html += `</div>`;
   els.bracketContent.innerHTML = html;
@@ -812,60 +856,75 @@ function drawBracketRoomWaiting(s, m){
   });
   const back = document.getElementById("bracket-back");
   if(back) back.addEventListener("click", () => {
+    stopPresenceTimer();
+    wsSend({type: "bracket_leave_room", match_id: m.match_id});
     BRACKET_ACTIVE_MATCH_ID = null;
     if(LAST_STATE) drawBracketUI(LAST_STATE);
   });
 }
 
-function drawBracketRoomResult(m, s){
+function drawBracketRoomRoundResult(m){
+  const winName = m.last_spin && m.last_spin.winner_user_id === (m.p1 && m.p1.user_id)
+    ? (m.p1 && m.p1.name) : (m.p2 && m.p2.name);
+  const p1w = m.p1_wins||0, p2w = m.p2_wins||0;
+  const target = m.series_target || 3;
+  const roundsLeft = `До победы в серии: ${Math.max(0, target - Math.max(p1w, p2w))}`;
+
+  els.bracketContent.innerHTML = `<div class="waiting-box">
+    <div class="waiting-ico">🎯</div>
+    <div class="waiting-txt">Раунд выиграл: <b>${escapeHtml(winName || "—")}</b></div>
+    <div style="color:#cbd5e1;font-size:15px;margin-top:8px;">Счёт серии: <b>${p1w}:${p2w}</b></div>
+    <div style="color:#94a3b8;font-size:13px;margin-top:4px;">${roundsLeft}</div>
+    <div style="color:#fbbf24;font-size:13px;margin-top:12px;">Следующий спин через <span id="br-next-cd">3</span>…</div>
+  </div>`;
+  let sec = 3;
+  const tick = setInterval(() => {
+    sec--;
+    const el = document.getElementById("br-next-cd");
+    if(el) el.textContent = Math.max(0, sec);
+    if(sec <= 0) clearInterval(tick);
+  }, 1000);
+}
+
+function drawBracketRoomFinalResult(m){
   const winName = m.winner ? m.winner.name : "—";
   const iWon = m.winner && m.winner.user_id === MY_ID;
   const iLost = m.loser && m.loser.user_id === MY_ID;
   const iAmPlayer = (m.p1 && m.p1.user_id === MY_ID) || (m.p2 && m.p2.user_id === MY_ID);
+  const p1w = m.p1_wins||0, p2w = m.p2_wins||0;
 
   let icon = "🏆", title = "";
   if(iWon) title = "Вы прошли дальше!";
   else if(iLost) title = "Вы выбыли из турнира";
-  else if(!iAmPlayer) title = `Победитель раунда: ${escapeHtml(winName)}`;
+  else if(!iAmPlayer) title = `Победитель матча: ${escapeHtml(winName)}`;
   else title = `Победитель: ${escapeHtml(winName)}`;
 
-  const p1w = m.p1_wins || 0, p2w = m.p2_wins || 0;
-  const scoreLine = `<div style="color:#cbd5e1;font-size:14px;margin-top:6px;">Счёт в серии: <b>${p1w}:${p2w}</b> (до ${m.series_target})</div>`;
-
-  let extra = "";
-  if(m.finished){
-    extra = `<div style="color:#94a3b8;font-size:13px;margin-top:8px;">Серия завершена.</div>`;
-  } else {
-    extra = `<div style="color:#fbbf24;font-size:13px;margin-top:8px;">Играем следующий раунд серии…</div>`;
-  }
-
-  const exitDelay = m.finished ? 7 : 4;
   els.bracketContent.innerHTML = `<div class="waiting-box">
     <div class="waiting-ico">${icon}</div>
     <div class="waiting-txt">${title}</div>
-    ${scoreLine}
-    ${extra}
-    <div style="color:#fbbf24;font-size:13px;margin-top:12px;">Автовыход через <span id="br-exit-cd">${exitDelay}</span>…</div>
+    <div style="color:#cbd5e1;font-size:15px;margin-top:8px;">Финальный счёт серии: <b>${p1w}:${p2w}</b></div>
+    <div style="color:#94a3b8;font-size:13px;margin-top:8px;">Серия завершена.</div>
+    <div style="color:#fbbf24;font-size:13px;margin-top:12px;">Автовыход через <span id="br-exit-cd">7</span>…</div>
   </div>`;
-  let sec = exitDelay;
+  let sec = 7;
   const tick = setInterval(() => {
     sec--;
     const el = document.getElementById("br-exit-cd");
-    if(el) el.textContent = sec;
+    if(el) el.textContent = Math.max(0, sec);
     if(sec <= 0) clearInterval(tick);
   }, 1000);
 }
 
 function animateBracketSpin(s, m, onDone){
-  const canvas = document.getElementById("wheel");
+  let canvas = document.getElementById("wheel");
   if(!canvas){
     const wrap = document.createElement("div");
     wrap.className = "wheel-stage";
     wrap.innerHTML = `<div class="pointer"></div><canvas id="wheel" width="640" height="640"></canvas>`;
     els.bracketContent.innerHTML = "";
     els.bracketContent.appendChild(wrap);
+    canvas = document.getElementById("wheel");
   }
-  const realCanvas = document.getElementById("wheel");
   const players = [m.p1, m.p2].filter(Boolean);
   const n = players.length;
   const winnerIdx = m.last_spin.winner_index;
@@ -881,11 +940,11 @@ function animateBracketSpin(s, m, onDone){
   const el = nowServer() - serverStart;
   const initialK = Math.min(1, Math.max(0, el / duration));
   WHEEL_ANGLE = startAngle + (target - startAngle) * (1 - Math.pow(1 - initialK, 4));
-  drawBracketWheelDynamic(realCanvas, players);
+  drawBracketWheelDynamic(canvas, players);
 
   if(initialK >= 1){
     WHEEL_ANGLE = target;
-    drawBracketWheelDynamic(realCanvas, players);
+    drawBracketWheelDynamic(canvas, players);
     if(onDone) onDone();
     return;
   }
@@ -895,12 +954,12 @@ function animateBracketSpin(s, m, onDone){
     const k = Math.min(1, Math.max(0, elapsed / duration));
     const eased = 1 - Math.pow(1 - k, 4);
     WHEEL_ANGLE = startAngle + (target - startAngle) * eased;
-    drawBracketWheelDynamic(realCanvas, players);
+    drawBracketWheelDynamic(canvas, players);
     if(k < 1){
       BRACKET_MATCH_VIEW_ANIM[m.match_id] = requestAnimationFrame(frame);
     } else {
       WHEEL_ANGLE = target;
-      drawBracketWheelDynamic(realCanvas, players);
+      drawBracketWheelDynamic(canvas, players);
       if(onDone) onDone();
     }
   }
