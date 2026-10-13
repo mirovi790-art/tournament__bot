@@ -20,7 +20,8 @@ from database import (init_db, SessionLocal, User, Admin, Ban, Tournament,
                        Participant)
 from webapp import create_app
 import game as gm
-from game import PokerGame, WheelGame, Wheel1v1Game, BracketGame, MAX_TABLE
+from game import (PokerGame, WheelGame, Wheel1v1Game, BracketGame,
+                  MAX_TABLE, BRACKET_SERIES_TARGET)
 
 load_dotenv()
 
@@ -34,7 +35,7 @@ logging.basicConfig(level=logging.INFO)
 router = Router()
 _finalized_tids = set()
 _bg_tasks: set[asyncio.Task] = set()
-VALID_BRACKET_SIZES = [4, 8, 16, 32]
+VALID_BRACKET_SIZES = [4, 8, 16]
 
 
 def _spawn(coro):
@@ -150,7 +151,7 @@ def game_type_kb():
 
 def bracket_size_kb():
     rows = [[InlineKeyboardButton(text=f"{n} игроков", callback_data=f"tt_bracket_{n}")]
-            for n in (4, 8, 16)]
+            for n in VALID_BRACKET_SIZES]
     rows.append([InlineKeyboardButton(text="❌ Отмена", callback_data="admin_cancel_fsm")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
@@ -245,7 +246,10 @@ def _help_text():
             "<b>🃏 Покер:</b>\n▫️ До 7 игроков за столом.\n\n"
             "<b>🎡 Колесо Фортуны:</b>\n▫️ Крутит админ.\n\n"
             "<b>⚔️ Колесо 1×1:</b>\n▫️ Два игрока по нику.\n\n"
-            "<b>🏆 Турнир с сеткой:</b>\n▫️ 4/8/16 игроков в плей-офф.\n▫️ Победитель матча проходит дальше.\n\n"
+            "<b>🏆 Турнир с сеткой:</b>\n"
+            "▫️ 4/8/16 игроков в плей-офф.\n"
+            "▫️ Серия до 3 побед в каждом бою.\n"
+            "▫️ Победитель матча проходит дальше.\n\n"
             "<blockquote>🎯 Кнопки внизу.</blockquote>")
 
 
@@ -729,19 +733,16 @@ async def tt_prize(message: Message, state: FSMContext):
         await message.answer(f"<b>🆕 Покер</b>\n{SEP}\nСтартовый стек:")
     elif gt == "wheel_1v1":
         await state.set_state(TournamentFSM.w1v1_p1)
-        await message.answer(
-            f"<b>⚔️ Колесо 1×1 · Шаг 5</b>\n{SEP}\n"
-            "Введи <b>@username</b> или ID <b>первого</b> игрока:")
+        await message.answer(f"<b>⚔️ Колесо 1×1 · Шаг 5</b>\n{SEP}\n"
+                             "Введи <b>@username</b> или ID <b>первого</b> игрока:")
     elif gt == "bracket":
         await state.set_state(TournamentFSM.bracket_size)
-        await message.answer(
-            f"<b>🏆 Турнир с сеткой · Шаг 5</b>\n{SEP}\nВыбери <b>размер сетки</b>:",
-            reply_markup=bracket_size_kb())
+        await message.answer(f"<b>🏆 Турнир с сеткой · Шаг 5</b>\n{SEP}\n"
+                             "Выбери <b>размер сетки</b>:", reply_markup=bracket_size_kb())
     else:
         await _show_confirm(message, state)
 
 
-# ===== 1×1 =====
 @router.message(TournamentFSM.w1v1_p1)
 async def tt_w1v1_p1(message: Message, state: FSMContext):
     if not await _is_admin(message.from_user.id): return
@@ -762,7 +763,7 @@ async def tt_w1v1_p1(message: Message, state: FSMContext):
                 s.add(User(id=uid, first_name=f"Игрок {uid}")); await s.commit()
     await state.update_data(w1v1_p1_id=uid)
     await state.set_state(TournamentFSM.w1v1_p2)
-    await message.answer(f"<b>⚔️ Колесо 1×1 · Шаг 6</b>\n{SEP}\n"
+    await message.answer(f"<b>⚔️ Шаг 6</b>\n{SEP}\n"
                          "Введи <b>@username</b> или ID <b>второго</b> игрока:")
 
 
@@ -791,7 +792,6 @@ async def tt_w1v1_p2(message: Message, state: FSMContext):
     await _show_confirm(message, state)
 
 
-# ===== BRACKET =====
 @router.callback_query(F.data.startswith("tt_bracket_"))
 async def tt_bracket_size(cb: CallbackQuery, state: FSMContext):
     try: n = int(cb.data.split("_")[-1])
@@ -832,15 +832,13 @@ async def tt_bracket_player(message: Message, state: FSMContext):
     players.append(uid)
     await state.update_data(bracket_players=players)
     if len(players) < size:
-        await message.answer(
-            f"<b>🏆 Шаг 6</b>\n{SEP}\n"
-            f"Введи <b>@username</b> или ID <b>игрока {len(players) + 1} из {size}</b>:")
+        await message.answer(f"<b>🏆 Шаг 6</b>\n{SEP}\n"
+                             f"Введи <b>@username</b> или ID <b>игрока {len(players) + 1} из {size}</b>:")
     else:
         await message.answer("✅ Все игроки добавлены.")
         await _show_confirm(message, state)
 
 
-# ===== POKER =====
 @router.message(TournamentFSM.poker_stack)
 async def tt_stack(message: Message, state: FSMContext):
     if not await _is_admin(message.from_user.id): return
@@ -897,6 +895,7 @@ async def _show_confirm(message: Message, state: FSMContext):
                 u = await s.get(User, uid)
                 names.append(_display_name(u, uid))
         lines += [f"🔹 Размер сетки: <code>{size}</code>",
+                  f"🔹 Серия: до <code>{BRACKET_SERIES_TARGET}</code> побед",
                   f"🔹 Игроки: {', '.join(esc(n) for n in names)}",
                   f"\n<blockquote>Все {size} игроков получат приглашение. "
                   "Турнир стартует, когда все примут.</blockquote>"]
@@ -959,7 +958,8 @@ async def tt_confirm(cb: CallbackQuery, state: FSMContext):
                     f"<b>🏆 Вас пригласили в турнир с сеткой!</b>\n{SEP}\n"
                     f"🏆 <code>{esc(data['name'])}</code>\n"
                     f"🎁 Приз: <i>{esc(data.get('prize') or '—')}</i>\n\n"
-                    f"<blockquote>Размер сетки: {size}. Принять приглашение?</blockquote>",
+                    f"<blockquote>Размер сетки: {size}. Серия до 3 побед. "
+                    "Принять приглашение?</blockquote>",
                     reply_markup=invite_response_kb(tid))
             except Exception as e:
                 logging.warning("bracket invite fail uid=%s: %s", uid, e)
@@ -992,9 +992,7 @@ async def _show_tournament_menu(cb: CallbackQuery, tid: int):
     if t.game_type == "bracket" and t.status == "registration":
         status_label = f"ожидание приглашений ({len(approved)}/{t.bracket_size})"
     total_needed = t.bracket_size if t.game_type == "bracket" else (2 if t.game_type == "wheel_1v1" else None)
-    total_label = ""
-    if total_needed:
-        total_label = f" / {total_needed}"
+    total_label = f" / {total_needed}" if total_needed else ""
     text = (f"<b>🏆 ТУРНИР:</b> <code>{esc(t.name)}</code>\n{SEP}\n"
             f"<b>ID:</b> <code>{t.id}</code>\n"
             f"<b>Игра:</b> {gt}\n"
@@ -1225,7 +1223,6 @@ async def _start_tournament(bot, tid, notify=False):
 
 
 async def _auto_start_bracket(bot, tid):
-    """Создаёт BracketGame, когда все приглашённые приняли."""
     async with SessionLocal() as s:
         t = await s.get(Tournament, tid)
         if not t or t.game_type != "bracket" or t.status != "registration":
@@ -1238,7 +1235,7 @@ async def _auto_start_bracket(bot, tid):
         uids = [p.user_id for p in approved[:t.bracket_size]]
     names = await _enrich_names(bot, uids)
     players = [{"user_id": uid, "name": names.get(uid, f"Игрок {uid}")} for uid in uids]
-    g = BracketGame(tid, players, t.prize or "🏆 Приз")
+    g = BracketGame(tid, players, t.prize or "🏆 Приз", series_target=BRACKET_SERIES_TARGET)
     gm.set_bracket(tid, g)
     async with SessionLocal() as s:
         tt = await s.get(Tournament, tid)
@@ -1249,7 +1246,7 @@ async def _auto_start_bracket(bot, tid):
             await bot.send_message(p["user_id"],
                 f"<b>🏆 Турнир с сеткой стартовал!</b>\n{SEP}\n"
                 f"🏆 <code>{esc(t.name)}</code>\n\n"
-                "<blockquote>Открой Mini App → вкладка «Сетка турнира».</blockquote>",
+                "<blockquote>Серия до 3 побед. Открой Mini App → вкладка «Сетка турнира».</blockquote>",
                 reply_markup=enter_webapp_kb(tid, WEBAPP_URL))
         except: pass
 
@@ -1318,12 +1315,7 @@ async def msg_invite(message: Message, state: FSMContext):
             Participant.tournament_id == tid, Participant.user_id == uid))
         p = r.scalar_one_or_none()
         if is_kick:
-            if p: await s.delete(p); await s.commit()
-            try:
-                await message.bot.send_message(uid,
-                    f"<b>🚫 Исключены</b>\n{SEP}\n🏆 <code>{esc(t.name)}</code>")
-            except: pass
-            await message.answer(f"<b>✅ Кикнут</b>\n🆔 <code>{uid}</code>")
+            await _do_kick_player(message.bot, tid, t, uid, p)
         else:
             if p:
                 if p.status in ("approved", "winner"):
@@ -1342,6 +1334,66 @@ async def msg_invite(message: Message, state: FSMContext):
             except: pass
             await message.answer(f"<b>✅ Приглашение отправлено</b>\n🆔 <code>{uid}</code>\n⏳ Ожидает подтверждения")
     await state.clear()
+
+
+async def _do_kick_player(bot, tid, t, uid, participant_row):
+    """Централизованный кик: удаляет из БД, из активной игры, авто-advance если нужно, уведомляет."""
+    async with SessionLocal() as s:
+        p = await s.get(Participant, participant_row.id) if participant_row else None
+        if p: p.status = "kicked"; await s.commit()
+
+    kicked_names = []
+    tgame = t.game_type
+
+    if tgame == "poker":
+        g = gm.get_poker(tid)
+        if g:
+            for tb in g.tables:
+                for pl in tb.players:
+                    if pl.user_id == uid and pl.chips > 0:
+                        pl.folded = True; pl.chips = 0
+                        if pl.place is None:
+                            alive = [x for x in tb.players if x.chips > 0]
+                            pl.place = len(alive) + 1
+                        break
+            await _broadcast_poker(tid, g)
+    elif tgame == "wheel":
+        g = gm.get_wheel(tid)
+        if g:
+            for a in list(g.active):
+                if a["user_id"] == uid:
+                    g.active.remove(a)
+                    g.eliminated.append({**a, "place": len(g.active) + 1}); break
+            if len(g.active) == 1 and not g.finished:
+                g.winner = g.active[0]; g.winner["place"] = 1; g.finished = True
+            await gm.broadcast(tid, g.to_dict())
+    elif tgame == "bracket":
+        g = gm.get_bracket(tid)
+        if g:
+            # Проверим — может это observer
+            status = g.user_status(uid)
+            advanced = g.remove_player(uid)
+            # оповестим оставшегося
+            if advanced:
+                for rnd in g.rounds:
+                    for m in rnd:
+                        if m.finished and m.loser is None and m.winner:
+                            # последний автопройденный матч — победитель = оставшийся
+                            try:
+                                await bot.send_message(m.winner["user_id"],
+                                    f"<b>🏆 Ваш соперник выбыл</b>\n{SEP}\n"
+                                    f"🏆 <code>{esc(t.name)}</code>\n\n"
+                                    "<blockquote>Вы автоматически прошли дальше по сетке!</blockquote>")
+                            except: pass
+                            break
+            await gm.broadcast(tid, g.to_dict())
+
+    # Уведомление кикнутому
+    try:
+        await bot.send_message(uid,
+            f"<b>🚫 Вас исключили из турнира</b>\n{SEP}\n"
+            f"🏆 <code>{esc(t.name)}</code>")
+    except: pass
 
 
 @router.callback_query(F.data == "my_tournaments")
@@ -1640,6 +1692,13 @@ async def _finalize_tournament(bot, tid, winner_id=None, winner_name=None, manua
                                      winner_uname, manual, approved_users, total, creator_id))
 
 
+async def _broadcast_poker(tid, g):
+    if not gm._connections.get(tid): return
+    for ws in gm._connections[tid]:
+        try: await ws.send_json(g.to_dict())
+        except Exception: gm.disconnect(tid, ws)
+
+
 async def _check_1v1_finish(bot, tid):
     g = gm.get_wheel_1v1(tid)
     if not g or not g.finished: return
@@ -1680,7 +1739,7 @@ async def game_ticker(bot):
                             if asyncio.get_event_loop().time() - tb._showdown_at > 4:
                                 tb.start_hand(); changed = True
                         else: tb._showdown_at = asyncio.get_event_loop().time()
-                if changed: await gm.broadcast(tid, g.to_dict())
+                if changed: await _broadcast_poker(tid, g)
             for tid, g in list(gm._active_wheel.items()):
                 if g.finished and tid not in _finalized_tids:
                     _finalized_tids.add(tid)
