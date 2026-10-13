@@ -367,7 +367,7 @@ class PokerGame:
 
 
 class WheelGame:
-    """Колесо. При spin сервер записывает started_at — клиенты синхронизируются по нему."""
+    """Обычное колесо. При spin сервер записывает started_at — клиенты синхронизируются по нему."""
     def __init__(self, tid, participants, prize):
         self.tid = tid
         self.prize = prize or "🏆 Приз"
@@ -380,7 +380,6 @@ class WheelGame:
 
     def spin(self):
         if self.finished or len(self.active) < 2: return None
-        # Снимок состава ДО удаления — клиенты рисуют колесо по нему
         before_active = [dict(p) for p in self.active]
         idx = random.randrange(len(self.active))
         eliminated = self.active.pop(idx)
@@ -401,14 +400,60 @@ class WheelGame:
 
     def to_dict(self):
         return {
-            "type": "wheel_state",
-            "tid": self.tid,
-            "active": self.active,
-            "eliminated": self.eliminated,
-            "spin_count": self.spin_count,
-            "finished": self.finished,
+            "type": "wheel_state", "tid": self.tid,
+            "active": self.active, "eliminated": self.eliminated,
+            "spin_count": self.spin_count, "finished": self.finished,
+            "winner": self.winner, "prize": self.prize,
+            "last_spin": self.last_spin,
+            "server_now": int(time.time() * 1000),
+        }
+
+
+class Wheel1v1Game:
+    """Колесо 1х1. Оба игрока жмут «Готов». Затем один спин — кто выпал, тот и победил."""
+    def __init__(self, tid, p1, p2, prize):
+        self.tid = tid
+        self.prize = prize or "🏆 Приз"
+        self.players = [dict(p1), dict(p2)]  # [{user_id, name, username}]
+        self.ready = set()
+        self.spin_count = 0
+        self.finished = False
+        self.winner = None
+        self.last_spin = None
+
+    def user_ids(self):
+        return [p["user_id"] for p in self.players]
+
+    def press_ready(self, user_id):
+        if self.finished: return False
+        if user_id not in self.user_ids(): return False
+        self.ready.add(user_id)
+        return True
+
+    def both_ready(self):
+        return len(self.ready) >= 2
+
+    def spin(self):
+        if self.finished or len(self.players) < 2: return None
+        idx = random.randrange(2)
+        self.winner = self.players[idx]
+        self.spin_count += 1
+        self.finished = True
+        self.last_spin = {
+            "winner_index": idx,
             "winner": self.winner,
-            "prize": self.prize,
+            "started_at": int(time.time() * 1000),
+            "duration": 8000,
+        }
+        return self.winner
+
+    def to_dict(self):
+        return {
+            "type": "wheel_1v1_state", "tid": self.tid,
+            "players": self.players,
+            "ready": list(self.ready),
+            "spin_count": self.spin_count, "finished": self.finished,
+            "winner": self.winner, "prize": self.prize,
             "last_spin": self.last_spin,
             "server_now": int(time.time() * 1000),
         }
@@ -416,13 +461,16 @@ class WheelGame:
 
 _active_poker: dict[int, PokerGame] = {}
 _active_wheel: dict[int, WheelGame] = {}
+_active_wheel_1v1: dict[int, Wheel1v1Game] = {}
 _connections: dict[int, set] = {}
 
 
 def get_poker(tid): return _active_poker.get(tid)
 def get_wheel(tid): return _active_wheel.get(tid)
+def get_wheel_1v1(tid): return _active_wheel_1v1.get(tid)
 def set_poker(tid, g): _active_poker[tid] = g
 def set_wheel(tid, g): _active_wheel[tid] = g
+def set_wheel_1v1(tid, g): _active_wheel_1v1[tid] = g
 
 
 def connect(tid, ws): _connections.setdefault(tid, set()).add(ws)
