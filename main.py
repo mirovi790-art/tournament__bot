@@ -1342,8 +1342,8 @@ async def _do_kick_player(bot, tid, t, uid, participant_row):
         p = await s.get(Participant, participant_row.id) if participant_row else None
         if p: p.status = "kicked"; await s.commit()
 
-    kicked_names = []
     tgame = t.game_type
+    tname = t.name
 
     if tgame == "poker":
         g = gm.get_poker(tid)
@@ -1370,29 +1370,24 @@ async def _do_kick_player(bot, tid, t, uid, participant_row):
     elif tgame == "bracket":
         g = gm.get_bracket(tid)
         if g:
-            # Проверим — может это observer
-            status = g.user_status(uid)
-            advanced = g.remove_player(uid)
-            # оповестим оставшегося
-            if advanced:
-                for rnd in g.rounds:
-                    for m in rnd:
-                        if m.finished and m.loser is None and m.winner:
-                            # последний автопройденный матч — победитель = оставшийся
-                            try:
-                                await bot.send_message(m.winner["user_id"],
-                                    f"<b>🏆 Ваш соперник выбыл</b>\n{SEP}\n"
-                                    f"🏆 <code>{esc(t.name)}</code>\n\n"
-                                    "<blockquote>Вы автоматически прошли дальше по сетке!</blockquote>")
-                            except: pass
-                            break
+            advanced_list = g.remove_player(uid)
+            seen = set()
+            for adv in advanced_list:
+                if adv["user_id"] in seen: continue
+                seen.add(adv["user_id"])
+                try:
+                    await bot.send_message(adv["user_id"],
+                        f"<b>🏆 Соперник выбыл</b>\n{SEP}\n"
+                        f"🏆 <code>{esc(tname)}</code>\n\n"
+                        "<blockquote>Вы автоматически прошли дальше по сетке!</blockquote>")
+                except Exception as e:
+                    logging.warning("auto-advance notify fail: %s", e)
             await gm.broadcast(tid, g.to_dict())
 
-    # Уведомление кикнутому
     try:
         await bot.send_message(uid,
             f"<b>🚫 Вас исключили из турнира</b>\n{SEP}\n"
-            f"🏆 <code>{esc(t.name)}</code>")
+            f"🏆 <code>{esc(tname)}</code>")
     except: pass
 
 
