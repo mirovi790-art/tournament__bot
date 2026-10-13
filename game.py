@@ -354,6 +354,11 @@ class PokerGame:
                 "log": [], "community": [], "pot": 0, "turn_idx": -1, "finished": True}
 
 
+def _rand_offset_ratio():
+    """Случайный сдвиг указателя внутри сегмента: диапазон [-0.4, 0.4] от центра."""
+    return random.uniform(-0.4, 0.4)
+
+
 class WheelGame:
     def __init__(self, tid, participants, prize):
         self.tid = tid
@@ -372,7 +377,8 @@ class WheelGame:
         self.spin_count += 1
         self.last_spin = {"eliminated": eliminated, "sector_index": idx,
                           "before_active": before_active,
-                          "started_at": int(time.time() * 1000), "duration": 8000}
+                          "started_at": int(time.time() * 1000), "duration": 8000,
+                          "final_offset_ratio": _rand_offset_ratio()}
         if len(self.active) == 1:
             self.winner = self.active[0]; self.winner["place"] = 1; self.finished = True
         return eliminated
@@ -407,7 +413,8 @@ class Wheel1v1Game:
         self.winner = self.players[idx]
         self.spin_count += 1; self.finished = True
         self.last_spin = {"winner_index": idx, "winner": self.winner,
-                          "started_at": int(time.time() * 1000), "duration": 8000}
+                          "started_at": int(time.time() * 1000), "duration": 8000,
+                          "final_offset_ratio": _rand_offset_ratio()}
         return self.winner
 
     def to_dict(self):
@@ -423,15 +430,14 @@ class BracketMatch:
         self.match_id = match_id
         self.round_num = round_num
         self.pos_in_round = pos_in_round
-        self.p1 = None  # {"user_id", "name"}
-        self.p2 = None
+        self.p1 = None; self.p2 = None
         self.ready = set()
         self.room_active = False
         self.room_ready = set()
         self.finished = False
-        self.winner = None
-        self.loser = None
+        self.winner = None; self.loser = None
         self.last_spin = None
+        self._spin_task_running = False
 
 
 class BracketGame:
@@ -476,28 +482,6 @@ class BracketGame:
                 if m.match_id == match_id: return m
         return None
 
-    def find_user_match(self, user_id):
-        for rnd in self.rounds:
-            for m in rnd:
-                if m.finished: continue
-                if m.p1 and m.p1["user_id"] == user_id: return m
-                if m.p2 and m.p2["user_id"] == user_id: return m
-        return None
-
-    def user_status(self, user_id):
-        if self.finished and self.winner and self.winner["user_id"] == user_id:
-            return "winner"
-        for rnd in self.rounds:
-            for m in rnd:
-                if m.finished and m.loser and m.loser["user_id"] == user_id:
-                    return "eliminated"
-        for rnd in self.rounds:
-            for m in rnd:
-                if m.finished: continue
-                if m.p1 and m.p1["user_id"] == user_id: return "playing"
-                if m.p2 and m.p2["user_id"] == user_id: return "playing"
-        return "waiting"
-
     def press_ready(self, match_id, user_id):
         m = self.find_match(match_id)
         if not m or m.finished or not m.p1 or not m.p2: return False
@@ -526,7 +510,9 @@ class BracketGame:
         idx = random.randrange(2)
         winner = m.p1 if idx == 0 else m.p2
         loser = m.p2 if idx == 0 else m.p1
-        m.last_spin = {"winner_index": idx, "started_at": int(time.time() * 1000), "duration": 8000}
+        m.last_spin = {"winner_index": idx,
+                       "started_at": int(time.time() * 1000), "duration": 20000,
+                       "final_offset_ratio": _rand_offset_ratio()}
         m.finished = True; m.winner = winner; m.loser = loser
         next_round = m.round_num + 1
         if next_round < len(self.rounds):
