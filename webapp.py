@@ -19,6 +19,8 @@ BOT_TOKEN = os.getenv("BOT_TOKEN", "")
 OWNER_ID = int(os.getenv("OWNER_ID", "0") or "0")
 HERE = os.path.dirname(os.path.abspath(__file__))
 
+_bracket_spin_tasks: dict[int, asyncio.Task] = {}
+
 
 def _esc(s): return html.escape(s or "")
 
@@ -101,6 +103,38 @@ async def _waiting_state(bot, tid, t, user_id):
             "eliminated": [], "spin_count": 0, "finished": False,
             "winner": None, "prize": t.prize or "🏆 Приз", "last_spin": None,
             "server_now": int(time.time() * 1000)}
+
+
+async def _schedule_bracket_spin(bot, tid, match_id):
+    """Ждёт 1.5 сек после готовности обоих, запускает спин, уведомляет проигравшего."""
+    try:
+        await asyncio.sleep(1.5)
+        g = gm.get_bracket(tid)
+        if not g: return
+        m = g.find_match(match_id)
+        if not m or m.finished: return
+        if len(m.room_ready) < 2: return
+        result = g.spin_match(match_id)
+        if not result: return
+        await gm.broadcast(tid, g.to_dict())
+        # Уведомление проигравшему
+        if result.loser:
+            try:
+                async with SessionLocal() as s:
+                    t = await s.get(Tournament, tid)
+                    tname = t.name if t else "?"
+                await bot.send_message(
+                    result.loser["user_id"],
+                    f"<b>❌ Вы выбыли из турнира</b>\n"
+                    f"➖➖➖➖➖➖➖➖➖\n"
+                    f"🏆 <code>{_esc(tname)}</code>\n\n"
+                    "<blockquote>К сожалению, вы проиграли матч.</blockquote>")
+            except Exception as e:
+                logging.warning("loser notify fail: %s", e)
+    except Exception as e:
+        logging.exception("schedule_bracket_spin error: %s", e)
+    finally:
+        _bracket_spin_tasks.pop(match_id, None)
 
 
 def create_app(bot):
@@ -332,10 +366,6 @@ async def _handle(bot, ws, tid, user_id, msg, t, is_admin):
         if not g: return
         if mtype == "bracket_ready":
             match_id = int(msg.get("match_id", 0))
-            if user_id not in [m["user_id"] for m in ([g.find_match(match_id).p1,
-                                                       g.find_match(match_id).p2]
-                                                      if g.find_match(match_id) else [])
-                               if m]: pass  # safety
             if g.press_ready(match_id, user_id):
                 await gm.broadcast(tid, g.to_dict())
         elif mtype == "bracket_enter":
@@ -346,26 +376,11 @@ async def _handle(bot, ws, tid, user_id, msg, t, is_admin):
             match_id = int(msg.get("match_id", 0))
             if g.press_room_ready(match_id, user_id):
                 await gm.broadcast(tid, g.to_dict())
-        elif mtype == "bracket_spin":
-            match_id = int(msg.get("match_id", 0))
-            m = g.find_match(match_id)
-            if not m: return
-            # авто-спин после обоих готовых
-            if len(m.room_ready) >= 2:
-                result = g.spin_match(match_id)
-                if result:
-                    await gm.broadcast(tid, g.to_dict())
-                    # уведомление проигравшему в бота
-                    if result.loser:
-                        try:
-                            await bot.send_message(
-                                result.loser["user_id"],
-                                f"<b>❌ Вы выбыли из турнира</b>\n"
-                                f"➖➖➖➖➖➖➖➖➖\n"
-                                f"🏆 <code>{_esc(t.name)}</code>\n\n"
-                                "<blockquote>К сожалению, вы проиграли матч.</blockquote>")
-                        except Exception as e:
-                            logging.warning("loser notify fail: %s", e)
+                m = g.find_match(match_id)
+                if m and len(m.room_ready) >= 2 and not m._spin_task_running:
+                    m._spin_task_running = True
+                    task = asyncio.create_task(_schedule_bracket_spin(bot, tid, match_id))
+                    _bracket_spin_tasks[match_id] = task
         elif mtype == "request_state":
             await ws.send_json(g.to_dict())
     else:
