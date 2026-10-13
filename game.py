@@ -15,7 +15,6 @@ MAX_TABLE = 7
 BRACKET_SERIES_TARGET = 3        # до 3 побед (best-of-5)
 BRACKET_SPIN_DURATION_MS = 20000 # 20 сек один спин
 BRACKET_NEXT_DELAY_S = 3.5       # пауза между спинами в серии
-PRESENCE_TTL = 15                # сколько секунд считаем пользователя в комнате
 
 
 def make_deck(): return [(r, s) for r in RANKS for s in SUITS]
@@ -431,52 +430,6 @@ class Wheel1v1Game:
                 "last_spin": self.last_spin, "server_now": int(time.time() * 1000)}
 
 
-# ============ PRESENCE (кто в комнате матча) ============
-_room_presence: dict[tuple[int, int], dict[int, dict]] = {}
-
-
-def room_presence_update(tid, match_id, user_id, name, role):
-    key = (tid, match_id)
-    d = _room_presence.setdefault(key, {})
-    d[user_id] = {"name": name, "role": role, "ts": time.time()}
-    now = time.time()
-    for uid in list(d.keys()):
-        if now - d[uid]["ts"] > PRESENCE_TTL:
-            del d[uid]
-
-
-def room_presence_list(tid, match_id):
-    key = (tid, match_id)
-    d = _room_presence.get(key)
-    if not d: return []
-    now = time.time()
-    result = []
-    for uid, info in list(d.items()):
-        if now - info["ts"] > PRESENCE_TTL:
-            del d[uid]; continue
-        result.append({"user_id": uid, "name": info["name"], "role": info["role"]})
-    # Сортировка: игроки → админ → создатель → наблюдатели
-    order = {"player": 0, "admin": 1, "creator": 2, "spectator": 3}
-    result.sort(key=lambda x: (order.get(x["role"], 9), x["name"]))
-    return result
-
-
-def room_presence_clear(tid, match_id, user_id=None):
-    key = (tid, match_id)
-    if key not in _room_presence: return
-    if user_id is None:
-        del _room_presence[key]
-    elif user_id in _room_presence[key]:
-        del _room_presence[key][user_id]
-
-
-def room_presence_clear_user(tid, user_id):
-    """Удалить юзера из всех комнат турнира (при кике/выходе)."""
-    for (t, mid) in list(_room_presence.keys()):
-        if t == tid and user_id in _room_presence[(t, mid)]:
-            del _room_presence[(t, mid)][user_id]
-
-
 # ============ BRACKET ============
 class BracketMatch:
     def __init__(self, match_id, round_num, pos_in_round, series_target=3):
@@ -498,6 +451,11 @@ class BracketMatch:
         self.spin_count = 0
         self.history = []
         self._spin_task_running = False
+        self.pending_winner_idx = None    # индекс победителя текущего (незавершённого) спина
+
+    def reset_for_new_spin(self):
+        self.room_ready = set()
+        self.pending_winner_idx = None
 
 
 class BracketGame:
@@ -601,6 +559,7 @@ class BracketGame:
             if len(m.ready) < 2: return False
             m.room_active = True
             return True
+        # наблюдатель: любой участник bracket (включая выбывших)
         return self._is_user_in_bracket(user_id)
 
     def press_room_ready(self, match_id, user_id):
@@ -610,33 +569,42 @@ class BracketGame:
         if user_id not in (m.p1["user_id"], m.p2["user_id"]): return False
         m.room_ready.add(user_id); return True
 
-    def unpress_room_ready(self, match_id, user_id):
-        m = self.find_match(match_id)
-        if not m or m.finished: return False
-        if user_id in m.room_ready:
-            m.room_ready.discard(user_id); return True
-        return False
-
+    # ---- Спин без увеличения счёта (визуальная фаза) ----
     def spin_match(self, match_id):
         m = self.find_match(match_id)
         if not m or m.finished: return None
         if len(m.room_ready) < 2: return None
+        if m.pending_winner_idx is not None: return None
+
         idx = random.randrange(2)
         winner = m.p1 if idx == 0 else m.p2
-        if idx == 0: m.p1_wins += 1
-        else: m.p2_wins += 1
         m.spin_count += 1
         m.last_spin = {"winner_index": idx,
                        "winner_user_id": winner["user_id"],
                        "started_at": int(time.time() * 1000),
                        "duration": BRACKET_SPIN_DURATION_MS,
                        "final_offset_ratio": _rand_offset_ratio()}
+        m.pending_winner_idx = idx
         m.history.append({"winner_index": idx, "winner_user_id": winner["user_id"]})
+        logger.info("[BRACKET tid=%s match=%s] spin START #%s pending_winner=%s",
+                    self.tid, match_id, m.spin_count, idx)
+        return m
 
+    # ---- Финализация: увеличение счёта, проверка серии ----
+    def finalize_spin(self, match_id):
+        m = self.find_match(match_id)
+        if not m or m.finished: return None, []
+        if m.pending_winner_idx is None: return None, []
+        idx = m.pending_winner_idx
+        if idx == 0: m.p1_wins += 1
+        else: m.p2_wins += 1
+        m.pending_winner_idx = None
+        advanced_list = []
         series_over = (m.p1_wins >= m.series_target or m.p2_wins >= m.series_target)
-        logger.info(
-            "[BRACKET tid=%s match=%s] spin #%s: p1_wins=%s p2_wins=%s target=%s series_over=%s",
-            self.tid, match_id, m.spin_count, m.p1_wins, m.p2_wins, m.series_target, series_over)
+
+        logger.info("[BRACKET tid=%s match=%s] spin FINALIZED #%s: p1_wins=%s p2_wins=%s target=%s over=%s",
+                    self.tid, match_id, m.spin_count, m.p1_wins, m.p2_wins,
+                    m.series_target, series_over)
 
         if series_over:
             m.finished = True
@@ -644,10 +612,8 @@ class BracketGame:
                 m.winner = m.p1; m.loser = m.p2
             else:
                 m.winner = m.p2; m.loser = m.p1
-            self._advance_winner(m)
-        # ВАЖНО: room_ready НЕ сбрасываем — серия идёт автоматически,
-        # пока кто-то не наберёт series_target побед.
-        return m
+            self._advance_winner(m, advanced_list)
+        return m, advanced_list
 
     def _advance_winner(self, m, advanced_log=None):
         if advanced_log is None: advanced_log = []
@@ -733,7 +699,7 @@ class BracketGame:
                     "finished": m.finished, "winner": m.winner, "loser": m.loser,
                     "spin_count": m.spin_count,
                     "last_spin": m.last_spin,
-                    "room_presence": room_presence_list(self.tid, m.match_id),
+                    "pending_winner_idx": m.pending_winner_idx,
                 } for m in rnd] for rnd in self.rounds],
             "server_now": int(time.time() * 1000),
         }
