@@ -39,18 +39,14 @@ async def _enrich_names(bot, user_ids):
                 result[uid] = u.first_name.strip(); continue
             try:
                 chat = await asyncio.wait_for(bot.get_chat(uid), timeout=3.0)
-                fn = (chat.first_name or "").strip()
-                un = (chat.username or "").strip()
+                fn = (chat.first_name or "").strip(); un = (chat.username or "").strip()
                 if fn: result[uid] = fn
                 elif un: result[uid] = "@" + un
                 else: result[uid] = f"Игрок {uid}"
-                if u is None:
-                    s.add(User(id=uid, first_name=fn or None, username=un or None))
+                if u is None: s.add(User(id=uid, first_name=fn or None, username=un or None))
                 else:
                     if fn: u.first_name = fn
                     if un: u.username = un
-            except asyncio.TimeoutError:
-                result[uid] = _display_name(u, uid)
             except Exception:
                 result[uid] = _display_name(u, uid)
         try: await s.commit()
@@ -91,12 +87,16 @@ async def _waiting_state(bot, tid, t, user_id):
                 "min_raise": 20, "big_blind": 20, "small_blind": 10,
                 "turn_idx": -1, "turn_deadline": 0, "turn_time": t.turn_time,
                 "dealer_idx": -1, "hand_number": 0, "finished": False,
-                "winner_info": None,
-                "log": ["⏳ Ожидание старта турнира..."],
+                "winner_info": None, "log": ["⏳ Ожидание старта турнира..."],
                 "players": [{"user_id": p["user_id"], "name": p["name"],
                              "chips": t.start_stack, "bet": 0, "folded": False,
                              "all_in": False, "place": None, "cards": [], "is_turn": False}
                             for p in players_info]}
+    if t.game_type == "bracket":
+        return {"type": "bracket_state", "tid": tid, "size": t.bracket_size,
+                "total_rounds": 0, "prize": t.prize or "🏆 Приз",
+                "finished": False, "winner": None, "rounds": [],
+                "waiting": True, "server_now": int(time.time() * 1000)}
     return {"type": "wheel_state", "tid": tid, "active": players_info,
             "eliminated": [], "spin_count": 0, "finished": False,
             "winner": None, "prize": t.prize or "🏆 Приз", "last_spin": None,
@@ -144,7 +144,6 @@ def create_app(bot):
             seen_tids = set()
             my_tours = []
 
-            # Мои турниры (включая 1v1 c pending/approved)
             r = await s.execute(select(Participant).where(
                 Participant.user_id == user_id,
                 Participant.status.in_(("approved", "winner", "pending"))))
@@ -153,8 +152,7 @@ def create_app(bot):
                 if not t or t.id in seen_tids: continue
                 if t.status in ("finished", "cancelled"): continue
                 seen_tids.add(t.id)
-                # Для 1v1 показываем статус приглашения
-                status_to_show = p.status if t.game_type == "wheel_1v1" else t.status
+                status_to_show = p.status if t.game_type in ("wheel_1v1", "bracket") else t.status
                 my_tours.append({"tid": t.id, "name": t.name, "status": t.status,
                                  "display_status": status_to_show,
                                  "game_type": t.game_type, "my_status": p.status,
@@ -173,7 +171,7 @@ def create_app(bot):
 
             if is_admin:
                 r = await s.execute(select(Tournament).where(
-                    Tournament.game_type.in_(("wheel", "wheel_1v1")),
+                    Tournament.game_type.in_(("wheel", "wheel_1v1", "bracket")),
                     Tournament.status.in_(("running", "paused"))))
                 for t in r.scalars().all():
                     if t.id in seen_tids: continue
@@ -213,7 +211,7 @@ def create_app(bot):
         return {"id": t.id, "name": t.name, "game_type": t.game_type,
                 "access_type": t.access_type, "status": t.status,
                 "prize": t.prize, "user_id": user_id,
-                "min_players": t.min_players,
+                "min_players": t.min_players, "bracket_size": t.bracket_size,
                 "is_admin": is_admin, "is_participant": is_participant,
                 "is_pending": is_pending, "my_status": my_status}
 
@@ -259,13 +257,15 @@ def create_app(bot):
             g = gm.get_wheel_1v1(tid)
             if g: state = g.to_dict()
             else:
-                # Ещё не создана — ждём принятия приглашения
                 state = {"type": "wheel_1v1_state", "tid": tid,
                          "players": [], "ready": [], "spin_count": 0,
                          "finished": False, "winner": None,
                          "prize": t.prize or "🏆 Приз", "last_spin": None,
                          "waiting": True,
                          "server_now": int(time.time() * 1000)}
+        elif t.game_type == "bracket":
+            g = gm.get_bracket(tid)
+            if g: state = g.to_dict()
         else:
             g = gm.get_wheel(tid)
             if g: state = g.to_dict()
@@ -295,10 +295,6 @@ async def _handle(bot, ws, tid, user_id, msg, t, is_admin):
         await _handle_1v1_ready(bot, tid, user_id); return
     if is_admin and mtype == "admin_end_tournament":
         await _admin_end(bot, tid); return
-    if is_admin and mtype == "admin_pause_tournament":
-        await _admin_pause(tid, True); return
-    if is_admin and mtype == "admin_resume_tournament":
-        await _admin_pause(tid, False); return
     if is_admin and mtype == "admin_kick_player":
         target = int(msg.get("user_id", 0) or 0)
         if target: await _admin_kick(tid, t, target)
@@ -331,6 +327,47 @@ async def _handle(bot, ws, tid, user_id, msg, t, is_admin):
                 await gm.broadcast(tid, g.to_dict())
         elif mtype == "request_state":
             await ws.send_json(g.to_dict())
+    elif t.game_type == "bracket":
+        g = gm.get_bracket(tid)
+        if not g: return
+        if mtype == "bracket_ready":
+            match_id = int(msg.get("match_id", 0))
+            if user_id not in [m["user_id"] for m in ([g.find_match(match_id).p1,
+                                                       g.find_match(match_id).p2]
+                                                      if g.find_match(match_id) else [])
+                               if m]: pass  # safety
+            if g.press_ready(match_id, user_id):
+                await gm.broadcast(tid, g.to_dict())
+        elif mtype == "bracket_enter":
+            match_id = int(msg.get("match_id", 0))
+            if g.enter_match(match_id, user_id, force=is_admin):
+                await gm.broadcast(tid, g.to_dict())
+        elif mtype == "bracket_room_ready":
+            match_id = int(msg.get("match_id", 0))
+            if g.press_room_ready(match_id, user_id):
+                await gm.broadcast(tid, g.to_dict())
+        elif mtype == "bracket_spin":
+            match_id = int(msg.get("match_id", 0))
+            m = g.find_match(match_id)
+            if not m: return
+            # авто-спин после обоих готовых
+            if len(m.room_ready) >= 2:
+                result = g.spin_match(match_id)
+                if result:
+                    await gm.broadcast(tid, g.to_dict())
+                    # уведомление проигравшему в бота
+                    if result.loser:
+                        try:
+                            await bot.send_message(
+                                result.loser["user_id"],
+                                f"<b>❌ Вы выбыли из турнира</b>\n"
+                                f"➖➖➖➖➖➖➖➖➖\n"
+                                f"🏆 <code>{_esc(t.name)}</code>\n\n"
+                                "<blockquote>К сожалению, вы проиграли матч.</blockquote>")
+                        except Exception as e:
+                            logging.warning("loser notify fail: %s", e)
+        elif mtype == "request_state":
+            await ws.send_json(g.to_dict())
     else:
         g = gm.get_wheel(tid)
         if not g: return
@@ -339,8 +376,7 @@ async def _handle(bot, ws, tid, user_id, msg, t, is_admin):
                 try: await ws.send_json({"type": "spin_denied"})
                 except: pass
                 return
-            g.spin()
-            await gm.broadcast(tid, g.to_dict())
+            g.spin(); await gm.broadcast(tid, g.to_dict())
         elif mtype == "request_state":
             await ws.send_json(g.to_dict())
 
@@ -350,10 +386,8 @@ async def _handle_1v1_ready(bot, tid, user_id):
     if not g or g.finished: return
     if user_id not in g.user_ids(): return
     if g.press_ready(user_id):
-        # Рассылаем обновлённый state (у игроков появится галочка)
         await gm.broadcast(tid, g.to_dict())
         if g.both_ready():
-            # Оба готовы → через 1.5 сек крутим
             async def _auto_spin():
                 await asyncio.sleep(1.5)
                 if g.finished: return
@@ -364,20 +398,11 @@ async def _handle_1v1_ready(bot, tid, user_id):
 
 async def _admin_end(bot, tid):
     from main import _finalize_tournament, _finalized_tids
-    gm._active_poker.pop(tid, None); gm._active_wheel.pop(tid, None)
-    gm._active_wheel_1v1.pop(tid, None)
+    for d in (gm._active_poker, gm._active_wheel, gm._active_wheel_1v1, gm._active_bracket):
+        d.pop(tid, None)
     _finalized_tids.discard(tid)
     try: await _finalize_tournament(bot, tid, manual=True)
     except Exception as e: logging.exception("admin_end fail: %s", e)
-
-
-async def _admin_pause(tid, pause):
-    async with SessionLocal() as s:
-        tt = await s.get(Tournament, tid)
-        if not tt: return
-        tt.status = "paused" if pause else "running"
-        await s.commit()
-    await gm.broadcast(tid, {"type": "tournament_paused" if pause else "tournament_resumed", "tid": tid})
 
 
 async def _admin_kick(tid, t, target_uid):
@@ -448,4 +473,3 @@ async def _broadcast_poker(tid, g):
     for ws in gm._connections[tid]:
         try: await ws.send_json(g.to_dict())
         except Exception: gm.disconnect(tid, ws)
-        
