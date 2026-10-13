@@ -1246,7 +1246,8 @@ async def _auto_start_bracket(bot, tid):
             await bot.send_message(p["user_id"],
                 f"<b>🏆 Турнир с сеткой стартовал!</b>\n{SEP}\n"
                 f"🏆 <code>{esc(t.name)}</code>\n\n"
-                "<blockquote>Серия до 3 побед. Открой Mini App → вкладка «Сетка турнира».</blockquote>",
+                f"<blockquote>Серия до {BRACKET_SERIES_TARGET} побед. "
+                "Открой Mini App → вкладка «Сетка турнира».</blockquote>",
                 reply_markup=enter_webapp_kb(tid, WEBAPP_URL))
         except: pass
 
@@ -1337,7 +1338,7 @@ async def msg_invite(message: Message, state: FSMContext):
 
 
 async def _do_kick_player(bot, tid, t, uid, participant_row):
-    """Централизованный кик: удаляет из БД, из активной игры, авто-advance если нужно, уведомляет."""
+    """Кик игрока из активной игры + авто-advance в bracket + уведомления."""
     async with SessionLocal() as s:
         p = await s.get(Participant, participant_row.id) if participant_row else None
         if p: p.status = "kicked"; await s.commit()
@@ -1383,6 +1384,8 @@ async def _do_kick_player(bot, tid, t, uid, participant_row):
                 except Exception as e:
                     logging.warning("auto-advance notify fail: %s", e)
             await gm.broadcast(tid, g.to_dict())
+
+    gm.room_presence_clear_user(tid, uid)
 
     try:
         await bot.send_message(uid,
