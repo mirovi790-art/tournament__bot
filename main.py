@@ -885,21 +885,24 @@ async def _show_tournament_menu(cb: CallbackQuery, tid: int):
         t = await s.get(Tournament, tid)
         if not t: await cb.answer("Нет", show_alert=True); return
         r = await s.execute(select(Participant).where(
-            Participant.tournament_id == tid,
-            Participant.status.in_(("approved", "winner", "pending"))))
+            Participant.tournament_id == tid))
         parts = r.scalars().all()
+    # Считаем только принятых
+    approved = [p for p in parts if p.status in ("approved", "winner")]
+    pending_count = len([p for p in parts if p.status == "pending"])
     gt = {"poker": "🃏 Покер", "wheel": "🎡 Колесо", "wheel_1v1": "⚔️ Колесо 1×1"}.get(t.game_type, "?")
     status_label = t.status
     if t.game_type == "wheel_1v1" and t.status == "registration":
-        approved = [p for p in parts if p.status == "approved"]
         status_label = f"ожидание приглашений ({len(approved)}/2)"
     text = (f"<b>🏆 ТУРНИР:</b> <code>{esc(t.name)}</code>\n{SEP}\n"
             f"<b>ID:</b> <code>{t.id}</code>\n"
             f"<b>Игра:</b> {gt}\n"
             f"<b>Доступ:</b> {'🟢 Открытый' if t.access_type=='open' else '🔴 Закрытый'}\n"
             f"<b>Статус:</b> <code>{status_label}</code>\n"
-            f"<b>Участников:</b> <code>{len(parts)}</code>\n"
-            f"<b>🎁 Приз:</b> <i>{esc(t.prize or '—')}</i>")
+            f"<b>Участников:</b> <code>{len(approved)}</code>")
+    if pending_count > 0:
+        text += f"\n<b>⏳ Ожидают подтверждения:</b> <code>{pending_count}</code>"
+    text += (f"\n<b>🎁 Приз:</b> <i>{esc(t.prize or '—')}</i>")
     kb = manage_tournament_kb(t.id, t.status, t.game_type)
     try: await cb.message.edit_text(text, reply_markup=kb)
     except: await cb.message.answer(text, reply_markup=kb)
@@ -910,14 +913,14 @@ async def _show_player_tournament_menu(cb: CallbackQuery, tid: int):
         t = await s.get(Tournament, tid)
         if not t: await cb.answer("Нет", show_alert=True); return
         r = await s.execute(select(Participant).where(
-            Participant.tournament_id == tid,
-            Participant.status.in_(("approved", "winner", "pending"))))
+            Participant.tournament_id == tid))
         parts = r.scalars().all()
+    approved = [p for p in parts if p.status in ("approved", "winner")]
     gt = {"poker": "🃏 Покер", "wheel": "🎡 Колесо", "wheel_1v1": "⚔️ Колесо 1×1"}.get(t.game_type, "?")
     text = (f"<b>🏆 ТУРНИР:</b> <code>{esc(t.name)}</code>\n{SEP}\n"
             f"<b>Игра:</b> {gt}\n"
             f"<b>Статус:</b> <code>{t.status}</code>\n"
-            f"<b>Участников:</b> <code>{len(parts)}</code>\n"
+            f"<b>Участников:</b> <code>{len(approved)}</code>\n"
             f"<b>🎁 Приз:</b> <i>{esc(t.prize or '—')}</i>")
     try: await cb.message.edit_text(text, reply_markup=player_tournament_kb(t.id, t.status))
     except: await cb.message.answer(text, reply_markup=player_tournament_kb(t.id, t.status))
@@ -1126,7 +1129,6 @@ async def _start_tournament(bot, tid, notify=False):
 
 @router.callback_query(F.data.startswith("tt_pause_"))
 async def cb_pause(cb: CallbackQuery):
-    # Убрано из UI, но оставлено на случай старых callback'ов
     await cb.answer("Пауза отключена", show_alert=True)
 
 
@@ -1220,8 +1222,17 @@ async def msg_invite(message: Message, state: FSMContext):
             except: pass
             await message.answer(f"<b>✅ Кикнут</b>\n🆔 <code>{uid}</code>")
         else:
-            if p: p.status = "approved"
-            else: s.add(Participant(tournament_id=tid, user_id=uid, status="approved"))
+            # === ВАЖНО: приглашение идёт со статусом pending ===
+            if p:
+                if p.status in ("approved", "winner"):
+                    await message.answer(
+                        f"<b>ℹ️ Игрок уже принял приглашение</b>\n"
+                        f"🆔 <code>{uid}</code>")
+                    await state.clear(); return
+                # pending/rejected/left/kicked → ставим pending и отправляем повторно
+                p.status = "pending"
+            else:
+                s.add(Participant(tournament_id=tid, user_id=uid, status="pending"))
             await s.commit()
             tname = t.name
             try:
@@ -1230,7 +1241,10 @@ async def msg_invite(message: Message, state: FSMContext):
                     "<blockquote>Примешь?</blockquote>",
                     reply_markup=invite_response_kb(tid))
             except: pass
-            await message.answer(f"<b>✅ Отправлено</b>\n🆔 <code>{uid}</code>")
+            await message.answer(
+                f"<b>✅ Приглашение отправлено</b>\n"
+                f"🆔 <code>{uid}</code>\n"
+                f"⏳ Ожидает подтверждения")
     await state.clear()
 
 
@@ -1359,7 +1373,7 @@ async def cb_accept_inv(cb: CallbackQuery):
         if not p:
             await cb.answer("Вы не участник", show_alert=True); return
         if p.status == "approved":
-            await cb.answer("Вы уже приняли", show_alert=True); return
+            await cb.answer("Вы уже приняли приглашение", show_alert=True); return
         p.status = "approved"
         u = await s.get(User, cb.from_user.id)
         if u is None:
@@ -1515,7 +1529,10 @@ async def _finalize_tournament(bot, tid, winner_id=None, winner_name=None, manua
             if p: p.status = "winner"
         r = await s.execute(select(Participant).where(Participant.tournament_id == tid))
         parts = r.scalars().all()
-        total = len(parts); user_ids = [p.user_id for p in parts]
+        # Уведомляем только принятых игроков
+        approved_users = [p.user_id for p in parts
+                          if p.status in ("approved", "winner")]
+        total = len(approved_users)
         await s.commit()
     try:
         await gm.broadcast(tid, {
@@ -1527,7 +1544,7 @@ async def _finalize_tournament(bot, tid, winner_id=None, winner_name=None, manua
         logging.exception("broadcast final fail: %s", e)
     _spawn(_notify_creator_and_users(
         bot, tname, tprize, winner_id, winner_name, winner_uname,
-        manual, user_ids, total, creator_id))
+        manual, approved_users, total, creator_id))
 
 
 async def _check_1v1_finish(bot, tid):
