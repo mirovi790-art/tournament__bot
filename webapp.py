@@ -105,8 +105,36 @@ async def _waiting_state(bot, tid, t, user_id):
             "server_now": int(time.time() * 1000)}
 
 
+async def _notify_loser_delayed(bot, tid, loser, delay_seconds):
+    await asyncio.sleep(delay_seconds)
+    try:
+        async with SessionLocal() as s:
+            t = await s.get(Tournament, tid)
+            tname = t.name if t else "?"
+        await bot.send_message(
+            loser["user_id"],
+            f"<b>❌ Вы выбыли из турнира</b>\n➖➖➖➖➖➖➖➖➖\n"
+            f"🏆 <code>{_esc(tname)}</code>\n\n"
+            "<blockquote>К сожалению, вы проиграли матч.</blockquote>")
+    except Exception as e:
+        logging.warning("loser notify fail: %s", e)
+
+
+async def _notify_auto_advanced(bot, tid, player):
+    try:
+        async with SessionLocal() as s:
+            t = await s.get(Tournament, tid)
+            tname = t.name if t else "?"
+        await bot.send_message(
+            player["user_id"],
+            f"<b>🏆 Соперник выбыл</b>\n➖➖➖➖➖➖➖➖➖\n"
+            f"🏆 <code>{_esc(tname)}</code>\n\n"
+            "<blockquote>Вы автоматически прошли дальше по сетке!</blockquote>")
+    except Exception as e:
+        logging.warning("auto-advance notify fail: %s", e)
+
+
 async def _schedule_bracket_spin(bot, tid, match_id):
-    """Ждёт 1.5 сек после готовности обоих, запускает спин, уведомляет проигравшего."""
     try:
         await asyncio.sleep(1.5)
         g = gm.get_bracket(tid)
@@ -117,20 +145,10 @@ async def _schedule_bracket_spin(bot, tid, match_id):
         result = g.spin_match(match_id)
         if not result: return
         await gm.broadcast(tid, g.to_dict())
-        # Уведомление проигравшему
+        # Уведомление проигравшему — только после окончания анимации
         if result.loser:
-            try:
-                async with SessionLocal() as s:
-                    t = await s.get(Tournament, tid)
-                    tname = t.name if t else "?"
-                await bot.send_message(
-                    result.loser["user_id"],
-                    f"<b>❌ Вы выбыли из турнира</b>\n"
-                    f"➖➖➖➖➖➖➖➖➖\n"
-                    f"🏆 <code>{_esc(tname)}</code>\n\n"
-                    "<blockquote>К сожалению, вы проиграли матч.</blockquote>")
-            except Exception as e:
-                logging.warning("loser notify fail: %s", e)
+            delay = gm.BRACKET_SPIN_DURATION_MS / 1000.0 + 2.0
+            asyncio.create_task(_notify_loser_delayed(bot, tid, result.loser, delay))
     except Exception as e:
         logging.exception("schedule_bracket_spin error: %s", e)
     finally:
@@ -180,11 +198,14 @@ def create_app(bot):
 
             r = await s.execute(select(Participant).where(
                 Participant.user_id == user_id,
-                Participant.status.in_(("approved", "winner", "pending"))))
+                Participant.status.in_(("approved", "winner", "pending", "kicked", "left"))))
             for p in r.scalars().all():
                 t = await s.get(Tournament, p.tournament_id)
                 if not t or t.id in seen_tids: continue
                 if t.status in ("finished", "cancelled"): continue
+                # выбывшим/кикнутым/вышедшим из bracket-турнира даём доступ наблюдателя
+                if p.status in ("kicked", "left") and t.game_type != "bracket":
+                    continue
                 seen_tids.add(t.id)
                 status_to_show = p.status if t.game_type in ("wheel_1v1", "bracket") else t.status
                 my_tours.append({"tid": t.id, "name": t.name, "status": t.status,
@@ -231,15 +252,17 @@ def create_app(bot):
             t = await s.get(Tournament, tid)
             if not t: raise HTTPException(status_code=404, detail="Not found")
             r = await s.execute(select(Participant).where(
-                Participant.tournament_id == tid, Participant.user_id == user_id,
-                Participant.status.in_(("approved", "winner", "pending"))))
+                Participant.tournament_id == tid, Participant.user_id == user_id))
             p = r.scalar_one_or_none()
             is_creator = (t.creator_id == user_id)
             is_admin = is_creator or ((await s.execute(select(Admin).where(
                 Admin.user_id == user_id))).scalar_one_or_none() is not None)
             is_participant = p is not None and p.status in ("approved", "winner")
             is_pending = p is not None and p.status == "pending"
-            if not is_participant and not is_admin and not is_pending:
+            is_excluded = p is not None and p.status in ("kicked", "left")
+            if not is_participant and not is_admin and not is_pending and not is_excluded:
+                raise HTTPException(status_code=403, detail="Not a participant")
+            if is_excluded and t.game_type != "bracket":
                 raise HTTPException(status_code=403, detail="Not a participant")
             my_status = p.status if p else "creator"
         return {"id": t.id, "name": t.name, "game_type": t.game_type,
@@ -247,7 +270,8 @@ def create_app(bot):
                 "prize": t.prize, "user_id": user_id,
                 "min_players": t.min_players, "bracket_size": t.bracket_size,
                 "is_admin": is_admin, "is_participant": is_participant,
-                "is_pending": is_pending, "my_status": my_status}
+                "is_pending": is_pending, "is_excluded": is_excluded,
+                "my_status": my_status}
 
     @app.websocket("/ws/{tid}")
     async def ws_endpoint(websocket: WebSocket, tid: int):
@@ -272,14 +296,15 @@ def create_app(bot):
             t = await s.get(Tournament, tid)
             if not t: await websocket.close(code=4004); return
             r = await s.execute(select(Participant).where(
-                Participant.tournament_id == tid, Participant.user_id == user_id,
-                Participant.status.in_(("approved", "winner"))))
+                Participant.tournament_id == tid, Participant.user_id == user_id))
             p = r.scalar_one_or_none()
             is_creator = (t.creator_id == user_id)
             is_admin = is_creator or ((await s.execute(select(Admin).where(
                 Admin.user_id == user_id))).scalar_one_or_none() is not None)
-            is_participant = p is not None
-        if not is_participant and not is_admin:
+            is_participant = p is not None and p.status in ("approved", "winner")
+            is_excluded = p is not None and p.status in ("kicked", "left")
+        allowed = is_admin or is_participant or (is_excluded and t.game_type == "bracket")
+        if not allowed:
             await websocket.close(code=4003); return
         await websocket.accept()
         gm.connect(tid, websocket)
@@ -324,14 +349,14 @@ async def _handle(bot, ws, tid, user_id, msg, t, is_admin):
     if mtype == "ping":
         await ws.send_json({"type": "pong"}); return
     if mtype == "leave_tournament":
-        await _handle_leave(ws, tid, user_id, t); return
+        await _handle_leave(bot, ws, tid, user_id, t); return
     if mtype == "ready" and t.game_type == "wheel_1v1":
         await _handle_1v1_ready(bot, tid, user_id); return
     if is_admin and mtype == "admin_end_tournament":
         await _admin_end(bot, tid); return
     if is_admin and mtype == "admin_kick_player":
         target = int(msg.get("user_id", 0) or 0)
-        if target: await _admin_kick(tid, t, target)
+        if target: await _admin_kick(bot, tid, t, target)
         return
     if t.game_type == "poker":
         g = gm.get_poker(tid)
@@ -363,7 +388,10 @@ async def _handle(bot, ws, tid, user_id, msg, t, is_admin):
             await ws.send_json(g.to_dict())
     elif t.game_type == "bracket":
         g = gm.get_bracket(tid)
-        if not g: return
+        if not g:
+            try: await ws.send_json({"type": "bracket_not_started"})
+            except: pass
+            return
         if mtype == "bracket_ready":
             match_id = int(msg.get("match_id", 0))
             if g.press_ready(match_id, user_id):
@@ -372,6 +400,8 @@ async def _handle(bot, ws, tid, user_id, msg, t, is_admin):
             match_id = int(msg.get("match_id", 0))
             if g.enter_match(match_id, user_id, force=is_admin):
                 await gm.broadcast(tid, g.to_dict())
+                try: await ws.send_json(g.to_dict())
+                except: pass
         elif mtype == "bracket_room_ready":
             match_id = int(msg.get("match_id", 0))
             if g.press_room_ready(match_id, user_id):
@@ -381,6 +411,8 @@ async def _handle(bot, ws, tid, user_id, msg, t, is_admin):
                     m._spin_task_running = True
                     task = asyncio.create_task(_schedule_bracket_spin(bot, tid, match_id))
                     _bracket_spin_tasks[match_id] = task
+        elif mtype == "bracket_leave_room":
+            await ws.send_json(g.to_dict())
         elif mtype == "request_state":
             await ws.send_json(g.to_dict())
     else:
@@ -420,12 +452,14 @@ async def _admin_end(bot, tid):
     except Exception as e: logging.exception("admin_end fail: %s", e)
 
 
-async def _admin_kick(tid, t, target_uid):
+async def _admin_kick(bot, tid, t, target_uid):
     async with SessionLocal() as s:
         r = await s.execute(select(Participant).where(
             Participant.tournament_id == tid, Participant.user_id == target_uid))
         p = r.scalar_one_or_none()
         if p: p.status = "kicked"; await s.commit()
+
+    tname = t.name
     if t.game_type == "poker":
         g = gm.get_poker(tid)
         if g:
@@ -448,15 +482,34 @@ async def _admin_kick(tid, t, target_uid):
             if len(g.active) == 1 and not g.finished:
                 g.winner = g.active[0]; g.winner["place"] = 1; g.finished = True
             await gm.broadcast(tid, g.to_dict())
+    elif t.game_type == "bracket":
+        g = gm.get_bracket(tid)
+        if g:
+            advanced_list = g.remove_player(target_uid)
+            seen = set()
+            for adv in advanced_list:
+                if adv["user_id"] in seen: continue
+                seen.add(adv["user_id"])
+                asyncio.create_task(_notify_auto_advanced(bot, tid, adv))
+            await gm.broadcast(tid, g.to_dict())
+
+    try:
+        await bot.send_message(target_uid,
+            f"<b>🚫 Вас исключили из турнира</b>\n➖➖➖➖➖➖➖➖➖\n"
+            f"🏆 <code>{_esc(tname)}</code>")
+    except: pass
+
     await gm.broadcast(tid, {"type": "player_kicked", "tid": tid, "user_id": target_uid})
 
 
-async def _handle_leave(ws, tid, user_id, t):
+async def _handle_leave(bot, ws, tid, user_id, t):
     async with SessionLocal() as s:
         r = await s.execute(select(Participant).where(
             Participant.tournament_id == tid, Participant.user_id == user_id))
         p = r.scalar_one_or_none()
         if p: p.status = "left"; await s.commit()
+        tname = t.name
+
     if t.game_type == "poker":
         g = gm.get_poker(tid)
         if g:
@@ -479,6 +532,17 @@ async def _handle_leave(ws, tid, user_id, t):
             if len(g.active) == 1 and not g.finished:
                 g.winner = g.active[0]; g.winner["place"] = 1; g.finished = True
             await gm.broadcast(tid, g.to_dict())
+    elif t.game_type == "bracket":
+        g = gm.get_bracket(tid)
+        if g:
+            advanced_list = g.remove_player(user_id)
+            seen = set()
+            for adv in advanced_list:
+                if adv["user_id"] in seen: continue
+                seen.add(adv["user_id"])
+                asyncio.create_task(_notify_auto_advanced(bot, tid, adv))
+            await gm.broadcast(tid, g.to_dict())
+
     try: await ws.send_json({"type": "left_tournament"})
     except: pass
 
