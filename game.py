@@ -19,8 +19,7 @@ def _eval5(cards):
     suits = [c[1] for c in cards]
     is_flush = len(set(suits)) == 1
     unique = sorted(set(ranks), reverse=True)
-    is_straight = False
-    straight_high = None
+    is_straight = False; straight_high = None
     if len(unique) == 5:
         if unique[0] - unique[4] == 4:
             is_straight = True; straight_high = unique[0]
@@ -70,8 +69,7 @@ class PokerPlayer:
 class _Table:
     def __init__(self, tid, table_id, players, start_stack, parent):
         self.tid = tid; self.table_id = table_id; self.parent = parent
-        self.players = [PokerPlayer(p["user_id"], p["name"],
-                                    p.get("chips", start_stack)) for p in players]
+        self.players = [PokerPlayer(p["user_id"], p["name"], p.get("chips", start_stack)) for p in players]
         self.dealer_idx = -1; self.phase = "waiting"; self.community = []
         self.pot = 0; self.current_bet = 0; self.min_raise = parent.big_blind
         self.turn_idx = -1; self.turn_deadline = 0; self.hand_number = 0
@@ -107,8 +105,7 @@ class _Table:
         if len(alive) < 2: self._finish_table(); return
         self.hand_number += 1; self.community = []; self.pot = 0; self.current_bet = 0
         self.phase = "preflop"; self.deck = make_deck(); random.shuffle(self.deck)
-        self.min_raise = self.parent.big_blind; self.winner_info = None
-        self._showdown_at = None
+        self.min_raise = self.parent.big_blind; self.winner_info = None; self._showdown_at = None
         for p in self.players:
             p.cards = []; p.bet = 0; p.total_bet = 0
             p.folded = p.chips <= 0; p.all_in = False; p.acted = False
@@ -139,8 +136,7 @@ class _Table:
             if p.bet != self.current_bet: return False
             p.acted = True; self.log.append(f"{p.name}: чек")
         elif act == "call":
-            to_call = self.current_bet - p.bet
-            amt = min(to_call, p.chips)
+            to_call = self.current_bet - p.bet; amt = min(to_call, p.chips)
             p.chips -= amt; p.bet += amt; p.total_bet += amt; self.pot += amt
             if p.chips == 0: p.all_in = True
             p.acted = True; self.log.append(f"{p.name}: колл {amt}")
@@ -152,26 +148,21 @@ class _Table:
             if p.chips == 0: p.all_in = True
             self.current_bet = p.bet; self.min_raise = amount
             for other in self.players:
-                if other is not p and not other.folded and not other.all_in:
-                    other.acted = False
+                if other is not p and not other.folded and not other.all_in: other.acted = False
             p.acted = True; self.log.append(f"{p.name}: рейз до {p.bet}")
         elif act == "allin":
             amt = p.chips; p.chips = 0; p.bet += amt; p.total_bet += amt; self.pot += amt
             if p.bet > self.current_bet:
                 self.min_raise = p.bet - self.current_bet; self.current_bet = p.bet
                 for other in self.players:
-                    if other is not p and not other.folded and not other.all_in:
-                        other.acted = False
+                    if other is not p and not other.folded and not other.all_in: other.acted = False
             p.all_in = True; p.acted = True; self.log.append(f"{p.name}: ОЛЛ-ИН {amt}")
-        else:
-            return False
-        if len(self._alive()) <= 1:
-            self._end_hand_by_fold(); return True
+        else: return False
+        if len(self._alive()) <= 1: self._end_hand_by_fold(); return True
         if self._betting_round_done() or all(p.all_in or p.folded or p.chips == 0 for p in self.players):
             self._advance_phase()
         else:
-            self.turn_idx = self._next_idx(self.turn_idx,
-                lambda x: not x.folded and not x.all_in and x.chips > 0)
+            self.turn_idx = self._next_idx(self.turn_idx, lambda x: not x.folded and not x.all_in and x.chips > 0)
             self.turn_deadline = time.time() + self.parent.turn_time
         return True
 
@@ -190,11 +181,11 @@ class _Table:
             self.community += [self.deck.pop(), self.deck.pop(), self.deck.pop()]
             self.phase = "flop"; self.log.append("ФЛОП: " + " ".join(card_str(c) for c in self.community))
         elif self.phase == "flop":
-            self.community.append(self.deck.pop())
-            self.phase = "turn"; self.log.append("ТЁРН: " + " ".join(card_str(c) for c in self.community))
+            self.community.append(self.deck.pop()); self.phase = "turn"
+            self.log.append("ТЁРН: " + " ".join(card_str(c) for c in self.community))
         elif self.phase == "turn":
-            self.community.append(self.deck.pop())
-            self.phase = "river"; self.log.append("РИВЕР: " + " ".join(card_str(c) for c in self.community))
+            self.community.append(self.deck.pop()); self.phase = "river"
+            self.log.append("РИВЕР: " + " ".join(card_str(c) for c in self.community))
         elif self.phase == "river":
             self._showdown(); return
         if len(self._can_act()) <= 1:
@@ -208,8 +199,7 @@ class _Table:
                 elif self.phase == "river":
                     self._showdown(); return
             return
-        self.turn_idx = self._next_idx(self.dealer_idx,
-            lambda x: not x.folded and not x.all_in and x.chips > 0)
+        self.turn_idx = self._next_idx(self.dealer_idx, lambda x: not x.folded and not x.all_in and x.chips > 0)
         self.turn_deadline = time.time() + self.parent.turn_time
 
     def _end_hand_by_fold(self):
@@ -261,8 +251,7 @@ class _Table:
                 "hand_number": self.hand_number, "finished": self.finished,
                 "winner_info": self.winner_info, "log": self.log[-8:],
                 "players": [{"user_id": p.user_id, "name": p.name, "chips": p.chips,
-                             "bet": p.bet, "folded": p.folded, "all_in": p.all_in,
-                             "place": p.place,
+                             "bet": p.bet, "folded": p.folded, "all_in": p.all_in, "place": p.place,
                              "cards": ([card_str(c) for c in p.cards]
                                        if (for_user_id == p.user_id or self.phase == "showdown" or self.finished)
                                        else (["?", "?"] if p.cards else [])),
@@ -346,8 +335,7 @@ class PokerGame:
             self._make_final_table(alive)
 
     def _make_final_table(self, alive_players):
-        players_data = [{"user_id": p["user_id"], "name": p["name"], "chips": p["chips"]}
-                        for p in alive_players]
+        players_data = [{"user_id": p["user_id"], "name": p["name"], "chips": p["chips"]} for p in alive_players]
         self.tables = []
         final = _Table(self.tid, 0, players_data, 0, self)
         for p in final.players:
@@ -367,16 +355,12 @@ class PokerGame:
 
 
 class WheelGame:
-    """Обычное колесо. При spin сервер записывает started_at — клиенты синхронизируются по нему."""
     def __init__(self, tid, participants, prize):
         self.tid = tid
         self.prize = prize or "🏆 Приз"
         self.active = [{"user_id": p["user_id"], "name": p["name"]} for p in participants]
-        self.eliminated = []
-        self.spin_count = 0
-        self.finished = False
-        self.winner = None
-        self.last_spin = None
+        self.eliminated = []; self.spin_count = 0; self.finished = False
+        self.winner = None; self.last_spin = None
 
     def spin(self):
         if self.finished or len(self.active) < 2: return None
@@ -386,75 +370,189 @@ class WheelGame:
         place = len(self.active) + 1
         self.eliminated.append({**eliminated, "place": place})
         self.spin_count += 1
-        self.last_spin = {
-            "eliminated": eliminated,
-            "sector_index": idx,
-            "before_active": before_active,
-            "started_at": int(time.time() * 1000),
-            "duration": 8000,
-        }
+        self.last_spin = {"eliminated": eliminated, "sector_index": idx,
+                          "before_active": before_active,
+                          "started_at": int(time.time() * 1000), "duration": 8000}
         if len(self.active) == 1:
-            self.winner = self.active[0]; self.winner["place"] = 1
-            self.finished = True
+            self.winner = self.active[0]; self.winner["place"] = 1; self.finished = True
         return eliminated
 
     def to_dict(self):
-        return {
-            "type": "wheel_state", "tid": self.tid,
-            "active": self.active, "eliminated": self.eliminated,
-            "spin_count": self.spin_count, "finished": self.finished,
-            "winner": self.winner, "prize": self.prize,
-            "last_spin": self.last_spin,
-            "server_now": int(time.time() * 1000),
-        }
+        return {"type": "wheel_state", "tid": self.tid, "active": self.active,
+                "eliminated": self.eliminated, "spin_count": self.spin_count,
+                "finished": self.finished, "winner": self.winner, "prize": self.prize,
+                "last_spin": self.last_spin, "server_now": int(time.time() * 1000)}
 
 
 class Wheel1v1Game:
-    """Колесо 1х1. Оба игрока жмут «Готов». Затем один спин — кто выпал, тот и победил."""
     def __init__(self, tid, p1, p2, prize):
         self.tid = tid
         self.prize = prize or "🏆 Приз"
-        self.players = [dict(p1), dict(p2)]  # [{user_id, name, username}]
-        self.ready = set()
-        self.spin_count = 0
-        self.finished = False
-        self.winner = None
-        self.last_spin = None
+        self.players = [dict(p1), dict(p2)]
+        self.ready = set(); self.spin_count = 0; self.finished = False
+        self.winner = None; self.last_spin = None
 
-    def user_ids(self):
-        return [p["user_id"] for p in self.players]
+    def user_ids(self): return [p["user_id"] for p in self.players]
 
     def press_ready(self, user_id):
         if self.finished: return False
         if user_id not in self.user_ids(): return False
-        self.ready.add(user_id)
-        return True
+        self.ready.add(user_id); return True
 
-    def both_ready(self):
-        return len(self.ready) >= 2
+    def both_ready(self): return len(self.ready) >= 2
 
     def spin(self):
         if self.finished or len(self.players) < 2: return None
         idx = random.randrange(2)
         self.winner = self.players[idx]
-        self.spin_count += 1
-        self.finished = True
-        self.last_spin = {
-            "winner_index": idx,
-            "winner": self.winner,
-            "started_at": int(time.time() * 1000),
-            "duration": 8000,
-        }
+        self.spin_count += 1; self.finished = True
+        self.last_spin = {"winner_index": idx, "winner": self.winner,
+                          "started_at": int(time.time() * 1000), "duration": 8000}
         return self.winner
 
     def to_dict(self):
+        return {"type": "wheel_1v1_state", "tid": self.tid, "players": self.players,
+                "ready": list(self.ready), "spin_count": self.spin_count,
+                "finished": self.finished, "winner": self.winner, "prize": self.prize,
+                "last_spin": self.last_spin, "server_now": int(time.time() * 1000)}
+
+
+# ============ BRACKET ============
+class BracketMatch:
+    def __init__(self, match_id, round_num, pos_in_round):
+        self.match_id = match_id
+        self.round_num = round_num
+        self.pos_in_round = pos_in_round
+        self.p1 = None  # {"user_id", "name"}
+        self.p2 = None
+        self.ready = set()
+        self.room_active = False
+        self.room_ready = set()
+        self.finished = False
+        self.winner = None
+        self.loser = None
+        self.last_spin = None
+
+
+class BracketGame:
+    def __init__(self, tid, players, prize):
+        self.tid = tid
+        self.prize = prize or "🏆 Приз"
+        self.size = len(players)
+        self.total_rounds = max(1, self.size.bit_length() - 1)
+        self.finished = False
+        self.winner = None
+        self._next_match_id = 0
+        self.rounds: list[list[BracketMatch]] = []
+
+        shuffled = list(players)
+        random.shuffle(shuffled)
+
+        first_round = []
+        for i in range(0, self.size, 2):
+            m = BracketMatch(self._new_id(), 0, i // 2)
+            m.p1 = shuffled[i] if i < len(shuffled) else None
+            m.p2 = shuffled[i + 1] if i + 1 < len(shuffled) else None
+            first_round.append(m)
+        self.rounds.append(first_round)
+
+        round_size = self.size // 2
+        round_num = 1
+        while round_size >= 1:
+            rnd = []
+            for pos in range(round_size):
+                rnd.append(BracketMatch(self._new_id(), round_num, pos))
+            self.rounds.append(rnd)
+            round_size //= 2
+            round_num += 1
+
+    def _new_id(self):
+        self._next_match_id += 1
+        return self._next_match_id
+
+    def find_match(self, match_id):
+        for rnd in self.rounds:
+            for m in rnd:
+                if m.match_id == match_id: return m
+        return None
+
+    def find_user_match(self, user_id):
+        for rnd in self.rounds:
+            for m in rnd:
+                if m.finished: continue
+                if m.p1 and m.p1["user_id"] == user_id: return m
+                if m.p2 and m.p2["user_id"] == user_id: return m
+        return None
+
+    def user_status(self, user_id):
+        if self.finished and self.winner and self.winner["user_id"] == user_id:
+            return "winner"
+        for rnd in self.rounds:
+            for m in rnd:
+                if m.finished and m.loser and m.loser["user_id"] == user_id:
+                    return "eliminated"
+        for rnd in self.rounds:
+            for m in rnd:
+                if m.finished: continue
+                if m.p1 and m.p1["user_id"] == user_id: return "playing"
+                if m.p2 and m.p2["user_id"] == user_id: return "playing"
+        return "waiting"
+
+    def press_ready(self, match_id, user_id):
+        m = self.find_match(match_id)
+        if not m or m.finished or not m.p1 or not m.p2: return False
+        if user_id not in (m.p1["user_id"], m.p2["user_id"]): return False
+        m.ready.add(user_id); return True
+
+    def enter_match(self, match_id, user_id, force=False):
+        m = self.find_match(match_id)
+        if not m or m.finished or not m.p1 or not m.p2: return False
+        if not force:
+            if user_id not in (m.p1["user_id"], m.p2["user_id"]): return False
+            if len(m.ready) < 2: return False
+        m.room_active = True
+        return True
+
+    def press_room_ready(self, match_id, user_id):
+        m = self.find_match(match_id)
+        if not m or m.finished or not m.room_active: return False
+        if user_id not in (m.p1["user_id"], m.p2["user_id"]): return False
+        m.room_ready.add(user_id); return True
+
+    def spin_match(self, match_id):
+        m = self.find_match(match_id)
+        if not m or m.finished: return None
+        if len(m.room_ready) < 2: return None
+        idx = random.randrange(2)
+        winner = m.p1 if idx == 0 else m.p2
+        loser = m.p2 if idx == 0 else m.p1
+        m.last_spin = {"winner_index": idx, "started_at": int(time.time() * 1000), "duration": 8000}
+        m.finished = True; m.winner = winner; m.loser = loser
+        next_round = m.round_num + 1
+        if next_round < len(self.rounds):
+            next_match = self.rounds[next_round][m.pos_in_round // 2]
+            if next_match.p1 is None: next_match.p1 = winner
+            else: next_match.p2 = winner
+        else:
+            self.finished = True; self.winner = winner
+        return m
+
+    def to_dict(self):
         return {
-            "type": "wheel_1v1_state", "tid": self.tid,
-            "players": self.players,
-            "ready": list(self.ready),
-            "spin_count": self.spin_count, "finished": self.finished,
-            "winner": self.winner, "prize": self.prize,
-            "last_spin": self.last_spin,
+            "type": "bracket_state", "tid": self.tid,
+            "size": self.size, "total_rounds": self.total_rounds,
+            "prize": self.prize, "finished": self.finished, "winner": self.winner,
+            "rounds": [
+                [{
+                    "match_id": m.match_id, "round_num": m.round_num,
+                    "pos_in_round": m.pos_in_round,
+                    "p1": m.p1, "p2": m.p2,
+                    "ready": list(m.ready),
+                    "room_active": m.room_active,
+                    "room_ready": list(m.room_ready),
+                    "finished": m.finished, "winner": m.winner, "loser": m.loser,
+                    "last_spin": m.last_spin,
+                } for m in rnd] for rnd in self.rounds],
             "server_now": int(time.time() * 1000),
         }
 
@@ -462,15 +560,18 @@ class Wheel1v1Game:
 _active_poker: dict[int, PokerGame] = {}
 _active_wheel: dict[int, WheelGame] = {}
 _active_wheel_1v1: dict[int, Wheel1v1Game] = {}
+_active_bracket: dict[int, BracketGame] = {}
 _connections: dict[int, set] = {}
 
 
 def get_poker(tid): return _active_poker.get(tid)
 def get_wheel(tid): return _active_wheel.get(tid)
 def get_wheel_1v1(tid): return _active_wheel_1v1.get(tid)
+def get_bracket(tid): return _active_bracket.get(tid)
 def set_poker(tid, g): _active_poker[tid] = g
 def set_wheel(tid, g): _active_wheel[tid] = g
 def set_wheel_1v1(tid, g): _active_wheel_1v1[tid] = g
+def set_bracket(tid, g): _active_bracket[tid] = g
 
 
 def connect(tid, ws): _connections.setdefault(tid, set()).add(ws)
