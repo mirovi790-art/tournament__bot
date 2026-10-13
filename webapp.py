@@ -19,7 +19,10 @@ BOT_TOKEN = os.getenv("BOT_TOKEN", "")
 OWNER_ID = int(os.getenv("OWNER_ID", "0") or "0")
 HERE = os.path.dirname(os.path.abspath(__file__))
 
+# Задачи серии bracket: {match_id: asyncio.Task}
 _bracket_spin_tasks: dict[int, asyncio.Task] = {}
+# Кто в какой комнате (для ролевой маркировки): {(tid, mid): {user_id: role}}
+_room_roles: dict[tuple[int, int], dict[int, str]] = {}
 
 
 def _esc(s): return html.escape(s or "")
@@ -115,7 +118,7 @@ async def _notify_loser_delayed(bot, tid, loser, delay_seconds):
             loser["user_id"],
             f"<b>❌ Вы выбыли из турнира</b>\n➖➖➖➖➖➖➖➖➖\n"
             f"🏆 <code>{_esc(tname)}</code>\n\n"
-            "<blockquote>К сожалению, вы проиграли матч.</blockquote>")
+            "<blockquote>К сожалению, вы проиграли серию.</blockquote>")
     except Exception as e:
         logging.warning("loser notify fail: %s", e)
 
@@ -134,29 +137,67 @@ async def _notify_auto_advanced(bot, tid, player):
         logging.warning("auto-advance notify fail: %s", e)
 
 
-async def _schedule_bracket_spin(bot, tid, match_id):
+async def _run_bracket_series(bot, tid, match_id):
+    """
+    Крутит спины серии в матче, пока кто-то не наберёт series_target побед.
+    Завершается, если матч финализирован или игроки покинули комнату.
+    """
     try:
+        # Первая пауза — после того, как оба нажали "Готов"
         await asyncio.sleep(1.5)
-        g = gm.get_bracket(tid)
-        if not g: return
-        m = g.find_match(match_id)
-        if not m or m.finished: return
-        if len(m.room_ready) < 2: return
-        result = g.spin_match(match_id)
-        if not result: return
-        await gm.broadcast(tid, g.to_dict())
-        # Уведомление проигравшему — только после окончания анимации
-        if result.loser:
-            delay = gm.BRACKET_SPIN_DURATION_MS / 1000.0 + 2.0
-            asyncio.create_task(_notify_loser_delayed(bot, tid, result.loser, delay))
+        while True:
+            g = gm.get_bracket(tid)
+            if not g: return
+            m = g.find_match(match_id)
+            if not m or m.finished: return
+            if len(m.room_ready) < 2: return
+            result = g.spin_match(match_id)
+            if not result: return
+            await gm.broadcast(tid, g.to_dict())
+            if result.finished:
+                if result.loser:
+                    delay = gm.BRACKET_SPIN_DURATION_MS / 1000.0 + 2.0
+                    asyncio.create_task(_notify_loser_delayed(bot, tid, result.loser, delay))
+                return
+            # Ждём окончания анимации спина + небольшая пауза перед следующей
+            await asyncio.sleep(gm.BRACKET_SPIN_DURATION_MS / 1000.0 + gm.BRACKET_NEXT_DELAY_S)
     except Exception as e:
-        logging.exception("schedule_bracket_spin error: %s", e)
+        logging.exception("run_bracket_series error: %s", e)
     finally:
         _bracket_spin_tasks.pop(match_id, None)
 
 
+def _task_running(match_id):
+    t = _bracket_spin_tasks.get(match_id)
+    return t is not None and not t.done()
+
+
+def _detect_role(user_id, t, m, is_admin):
+    if t.creator_id == user_id: return "creator"
+    if is_admin: return "admin"
+    if m.p1 and m.p1["user_id"] == user_id: return "player"
+    if m.p2 and m.p2["user_id"] == user_id: return "player"
+    return "spectator"
+
+
 def create_app(bot):
     app = FastAPI(title="Tournament Mini App")
+
+    @app.on_event("startup")
+    async def _startup():
+        asyncio.create_task(_presence_broadcast_loop())
+
+    async def _presence_broadcast_loop():
+        while True:
+            await asyncio.sleep(5)
+            try:
+                for tid, g in list(gm._active_bracket.items()):
+                    has_room = any(m.room_active and not m.finished
+                                   for rnd in g.rounds for m in rnd)
+                    if has_room:
+                        await gm.broadcast(tid, g.to_dict())
+            except Exception as e:
+                logging.exception("presence broadcast error: %s", e)
 
     @app.get("/")
     async def index():
@@ -203,7 +244,6 @@ def create_app(bot):
                 t = await s.get(Tournament, p.tournament_id)
                 if not t or t.id in seen_tids: continue
                 if t.status in ("finished", "cancelled"): continue
-                # выбывшим/кикнутым/вышедшим из bracket-турнира даём доступ наблюдателя
                 if p.status in ("kicked", "left") and t.game_type != "bracket":
                     continue
                 seen_tids.add(t.id)
@@ -338,8 +378,10 @@ def create_app(bot):
                 await _handle(bot, websocket, tid, user_id, msg, t, is_admin)
         except WebSocketDisconnect:
             gm.disconnect(tid, websocket)
+            gm.room_presence_clear_user(tid, user_id)
         except Exception:
             gm.disconnect(tid, websocket)
+            gm.room_presence_clear_user(tid, user_id)
 
     return app
 
@@ -392,27 +434,56 @@ async def _handle(bot, ws, tid, user_id, msg, t, is_admin):
             try: await ws.send_json({"type": "bracket_not_started"})
             except: pass
             return
-        if mtype == "bracket_ready":
-            match_id = int(msg.get("match_id", 0))
-            if g.press_ready(match_id, user_id):
-                await gm.broadcast(tid, g.to_dict())
-        elif mtype == "bracket_enter":
+        if mtype == "bracket_enter":
             match_id = int(msg.get("match_id", 0))
             if g.enter_match(match_id, user_id, force=is_admin):
+                # определить роль и добавить в presence
+                m = g.find_match(match_id)
+                role = _detect_role(user_id, t, m, is_admin)
+                # узнаем имя
+                async with SessionLocal() as s:
+                    u = await s.get(User, user_id)
+                    name = _display_name(u, user_id)
+                gm.room_presence_update(tid, match_id, user_id, name, role)
                 await gm.broadcast(tid, g.to_dict())
                 try: await ws.send_json(g.to_dict())
                 except: pass
+
+        elif mtype == "bracket_leave_room":
+            match_id = int(msg.get("match_id", 0))
+            gm.room_presence_clear(tid, match_id, user_id)
+            if g: await gm.broadcast(tid, g.to_dict())
+
+        elif mtype == "bracket_ready":
+            match_id = int(msg.get("match_id", 0))
+            if g.press_ready(match_id, user_id):
+                await gm.broadcast(tid, g.to_dict())
+
         elif mtype == "bracket_room_ready":
             match_id = int(msg.get("match_id", 0))
             if g.press_room_ready(match_id, user_id):
-                await gm.broadcast(tid, g.to_dict())
+                # presence heartbeat + role
                 m = g.find_match(match_id)
-                if m and len(m.room_ready) >= 2 and not m._spin_task_running:
-                    m._spin_task_running = True
-                    task = asyncio.create_task(_schedule_bracket_spin(bot, tid, match_id))
+                role = _detect_role(user_id, t, m, is_admin)
+                async with SessionLocal() as s:
+                    u = await s.get(User, user_id)
+                    name = _display_name(u, user_id)
+                gm.room_presence_update(tid, match_id, user_id, name, role)
+                await gm.broadcast(tid, g.to_dict())
+                if m and len(m.room_ready) >= 2 and not _task_running(match_id):
+                    task = asyncio.create_task(_run_bracket_series(bot, tid, match_id))
                     _bracket_spin_tasks[match_id] = task
-        elif mtype == "bracket_leave_room":
-            await ws.send_json(g.to_dict())
+
+        elif mtype == "bracket_presence":
+            match_id = int(msg.get("match_id", 0))
+            if g.find_match(match_id):
+                m = g.find_match(match_id)
+                role = _detect_role(user_id, t, m, is_admin)
+                async with SessionLocal() as s:
+                    u = await s.get(User, user_id)
+                    name = _display_name(u, user_id)
+                gm.room_presence_update(tid, match_id, user_id, name, role)
+
         elif mtype == "request_state":
             await ws.send_json(g.to_dict())
     else:
@@ -493,6 +564,8 @@ async def _admin_kick(bot, tid, t, target_uid):
                 asyncio.create_task(_notify_auto_advanced(bot, tid, adv))
             await gm.broadcast(tid, g.to_dict())
 
+    gm.room_presence_clear_user(tid, target_uid)
+
     try:
         await bot.send_message(target_uid,
             f"<b>🚫 Вас исключили из турнира</b>\n➖➖➖➖➖➖➖➖➖\n"
@@ -508,7 +581,6 @@ async def _handle_leave(bot, ws, tid, user_id, t):
             Participant.tournament_id == tid, Participant.user_id == user_id))
         p = r.scalar_one_or_none()
         if p: p.status = "left"; await s.commit()
-        tname = t.name
 
     if t.game_type == "poker":
         g = gm.get_poker(tid)
@@ -543,6 +615,7 @@ async def _handle_leave(bot, ws, tid, user_id, t):
                 asyncio.create_task(_notify_auto_advanced(bot, tid, adv))
             await gm.broadcast(tid, g.to_dict())
 
+    gm.room_presence_clear_user(tid, user_id)
     try: await ws.send_json({"type": "left_tournament"})
     except: pass
 
