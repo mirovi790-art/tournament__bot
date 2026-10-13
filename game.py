@@ -9,6 +9,9 @@ RANK_MAP = {r: i for i, r in enumerate(RANKS)}
 SUIT_SYM = {"s": "♠", "h": "♥", "d": "♦", "c": "♣"}
 MAX_TABLE = 7
 
+BRACKET_SERIES_TARGET = 3        # до 3 побед
+BRACKET_SPIN_DURATION_MS = 20000 # 20 сек один спин
+
 
 def make_deck(): return [(r, s) for r in RANKS for s in SUITS]
 def card_str(c): return f"{c[0]}{SUIT_SYM[c[1]]}"
@@ -426,26 +429,43 @@ class Wheel1v1Game:
 
 # ============ BRACKET ============
 class BracketMatch:
-    def __init__(self, match_id, round_num, pos_in_round):
+    def __init__(self, match_id, round_num, pos_in_round, series_target=3):
         self.match_id = match_id
         self.round_num = round_num
         self.pos_in_round = pos_in_round
-        self.p1 = None; self.p2 = None
+        self.series_target = series_target
+        self.p1 = None
+        self.p2 = None
+        self.p1_wins = 0
+        self.p2_wins = 0
         self.ready = set()
         self.room_active = False
         self.room_ready = set()
         self.finished = False
-        self.winner = None; self.loser = None
+        self.winner = None
+        self.loser = None
         self.last_spin = None
+        self.spin_count = 0
+        self.history = []
         self._spin_task_running = False
+
+    def reset_for_new_spin(self):
+        """После раунда в серии — сбросить готовность и дать шанс сыграть снова."""
+        self.room_ready = set()
 
 
 class BracketGame:
-    def __init__(self, tid, players, prize):
+    def __init__(self, tid, players, prize, series_target=3):
         self.tid = tid
         self.prize = prize or "🏆 Приз"
         self.size = len(players)
-        self.total_rounds = max(1, self.size.bit_length() - 1)
+        self.series_target = series_target
+        n = self.size
+        rounds_count = 0
+        while n > 1:
+            n //= 2
+            rounds_count += 1
+        self.total_rounds = max(1, rounds_count)
         self.finished = False
         self.winner = None
         self._next_match_id = 0
@@ -454,20 +474,21 @@ class BracketGame:
         shuffled = list(players)
         random.shuffle(shuffled)
 
+        first_round_size = max(1, self.size // 2)
         first_round = []
-        for i in range(0, self.size, 2):
-            m = BracketMatch(self._new_id(), 0, i // 2)
-            m.p1 = shuffled[i] if i < len(shuffled) else None
-            m.p2 = shuffled[i + 1] if i + 1 < len(shuffled) else None
+        for i in range(first_round_size):
+            m = BracketMatch(self._new_id(), 0, i, series_target)
+            m.p1 = shuffled[i * 2] if i * 2 < len(shuffled) else None
+            m.p2 = shuffled[i * 2 + 1] if i * 2 + 1 < len(shuffled) else None
             first_round.append(m)
         self.rounds.append(first_round)
 
-        round_size = self.size // 2
+        round_size = first_round_size // 2
         round_num = 1
         while round_size >= 1:
             rnd = []
             for pos in range(round_size):
-                rnd.append(BracketMatch(self._new_id(), round_num, pos))
+                rnd.append(BracketMatch(self._new_id(), round_num, pos, series_target))
             self.rounds.append(rnd)
             round_size //= 2
             round_num += 1
@@ -482,24 +503,51 @@ class BracketGame:
                 if m.match_id == match_id: return m
         return None
 
+    def find_user_match(self, user_id):
+        for rnd in self.rounds:
+            for m in rnd:
+                if m.finished: continue
+                if m.p1 and m.p1["user_id"] == user_id: return m
+                if m.p2 and m.p2["user_id"] == user_id: return m
+        return None
+
+    def user_status(self, user_id):
+        """playing | eliminated | winner | waiting"""
+        if self.winner and self.winner["user_id"] == user_id:
+            return "winner"
+        for rnd in self.rounds:
+            for m in rnd:
+                if m.finished and m.loser and m.loser["user_id"] == user_id:
+                    return "eliminated"
+        for rnd in self.rounds:
+            for m in rnd:
+                if m.finished: continue
+                if m.p1 and m.p1["user_id"] == user_id: return "playing"
+                if m.p2 and m.p2["user_id"] == user_id: return "playing"
+        return "waiting"
+
     def press_ready(self, match_id, user_id):
         m = self.find_match(match_id)
         if not m or m.finished or not m.p1 or not m.p2: return False
         if user_id not in (m.p1["user_id"], m.p2["user_id"]): return False
         m.ready.add(user_id); return True
 
-    def enter_match(self, match_id, user_id, force=False):
+    def enter_match(self, match_id, user_id, force=False, as_observer=False):
         m = self.find_match(match_id)
-        if not m or m.finished or not m.p1 or not m.p2: return False
-        if not force:
-            if user_id not in (m.p1["user_id"], m.p2["user_id"]): return False
-            if len(m.ready) < 2: return False
+        if not m: return False
+        if force or as_observer:
+            m.room_active = True
+            return True
+        if m.finished or not m.p1 or not m.p2: return False
+        if user_id not in (m.p1["user_id"], m.p2["user_id"]): return False
+        if len(m.ready) < 2: return False
         m.room_active = True
         return True
 
     def press_room_ready(self, match_id, user_id):
         m = self.find_match(match_id)
         if not m or m.finished or not m.room_active: return False
+        if not m.p1 or not m.p2: return False
         if user_id not in (m.p1["user_id"], m.p2["user_id"]): return False
         m.room_ready.add(user_id); return True
 
@@ -509,34 +557,91 @@ class BracketGame:
         if len(m.room_ready) < 2: return None
         idx = random.randrange(2)
         winner = m.p1 if idx == 0 else m.p2
-        loser = m.p2 if idx == 0 else m.p1
+        if idx == 0: m.p1_wins += 1
+        else: m.p2_wins += 1
+        m.spin_count += 1
         m.last_spin = {"winner_index": idx,
-                       "started_at": int(time.time() * 1000), "duration": 20000,
+                       "winner_user_id": winner["user_id"],
+                       "started_at": int(time.time() * 1000),
+                       "duration": BRACKET_SPIN_DURATION_MS,
                        "final_offset_ratio": _rand_offset_ratio()}
-        m.finished = True; m.winner = winner; m.loser = loser
+        m.history.append({"winner_index": idx, "winner_user_id": winner["user_id"]})
+
+        series_over = (m.p1_wins >= m.series_target or m.p2_wins >= m.series_target)
+        if series_over:
+            m.finished = True
+            if m.p1_wins > m.p2_wins:
+                m.winner = m.p1; m.loser = m.p2
+            else:
+                m.winner = m.p2; m.loser = m.p1
+            self._advance_winner(m)
+        else:
+            m.reset_for_new_spin()
+        return m
+
+    def _advance_winner(self, m):
         next_round = m.round_num + 1
         if next_round < len(self.rounds):
             next_match = self.rounds[next_round][m.pos_in_round // 2]
-            if next_match.p1 is None: next_match.p1 = winner
-            else: next_match.p2 = winner
+            if next_match.p1 is None: next_match.p1 = m.winner
+            elif next_match.p2 is None: next_match.p2 = m.winner
         else:
-            self.finished = True; self.winner = winner
-        return m
+            self.finished = True
+            self.winner = m.winner
+
+    def check_auto_advance(self, match_id):
+        """Если у матча только один игрок — он проходит дальше автоматически."""
+        m = self.find_match(match_id)
+        if not m or m.finished: return False
+        has_p1 = m.p1 is not None
+        has_p2 = m.p2 is not None
+        if has_p1 and not has_p2:
+            m.finished = True
+            m.winner = m.p1
+            m.loser = None
+            self._advance_winner(m)
+            return True
+        if has_p2 and not has_p1:
+            m.finished = True
+            m.winner = m.p2
+            m.loser = None
+            self._advance_winner(m)
+            return True
+        return False
+
+    def remove_player(self, uid):
+        """Игрока исключили/вышел. Убираем из его матча, запускаем авто-проход если нужно."""
+        for rnd in self.rounds:
+            for m in rnd:
+                if m.finished: continue
+                if m.p1 and m.p1["user_id"] == uid:
+                    m.p1 = None
+                    self.check_auto_advance(m.match_id)
+                    return True
+                if m.p2 and m.p2["user_id"] == uid:
+                    m.p2 = None
+                    self.check_auto_advance(m.match_id)
+                    return True
+        return False
 
     def to_dict(self):
         return {
             "type": "bracket_state", "tid": self.tid,
             "size": self.size, "total_rounds": self.total_rounds,
+            "series_target": self.series_target,
             "prize": self.prize, "finished": self.finished, "winner": self.winner,
             "rounds": [
                 [{
                     "match_id": m.match_id, "round_num": m.round_num,
                     "pos_in_round": m.pos_in_round,
                     "p1": m.p1, "p2": m.p2,
+                    "p1_wins": m.p1_wins, "p2_wins": m.p2_wins,
+                    "series_target": m.series_target,
                     "ready": list(m.ready),
                     "room_active": m.room_active,
                     "room_ready": list(m.room_ready),
                     "finished": m.finished, "winner": m.winner, "loser": m.loser,
+                    "spin_count": m.spin_count,
                     "last_spin": m.last_spin,
                 } for m in rnd] for rnd in self.rounds],
             "server_now": int(time.time() * 1000),
