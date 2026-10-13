@@ -31,7 +31,6 @@ def _display_name(u, uid):
 
 
 async def _enrich_names(bot, user_ids):
-    """С таймаутом 3 сек на каждый запрос."""
     result = {}
     async with SessionLocal() as s:
         for uid in user_ids:
@@ -51,15 +50,11 @@ async def _enrich_names(bot, user_ids):
                     if fn: u.first_name = fn
                     if un: u.username = un
             except asyncio.TimeoutError:
-                logging.warning("get_chat(%s) timeout", uid)
                 result[uid] = _display_name(u, uid)
-            except Exception as e:
-                logging.warning("get_chat(%s) failed: %s", uid, e)
+            except Exception:
                 result[uid] = _display_name(u, uid)
-        try:
-            await s.commit()
-        except Exception as e:
-            logging.exception("commit enrich names: %s", e)
+        try: await s.commit()
+        except: pass
     return result
 
 
@@ -149,15 +144,19 @@ def create_app(bot):
             seen_tids = set()
             my_tours = []
 
+            # Мои турниры (включая 1v1 c pending/approved)
             r = await s.execute(select(Participant).where(
                 Participant.user_id == user_id,
-                Participant.status.in_(("approved", "winner"))))
+                Participant.status.in_(("approved", "winner", "pending"))))
             for p in r.scalars().all():
                 t = await s.get(Tournament, p.tournament_id)
                 if not t or t.id in seen_tids: continue
                 if t.status in ("finished", "cancelled"): continue
                 seen_tids.add(t.id)
+                # Для 1v1 показываем статус приглашения
+                status_to_show = p.status if t.game_type == "wheel_1v1" else t.status
                 my_tours.append({"tid": t.id, "name": t.name, "status": t.status,
+                                 "display_status": status_to_show,
                                  "game_type": t.game_type, "my_status": p.status,
                                  "prize": t.prize or ""})
 
@@ -168,17 +167,19 @@ def create_app(bot):
                 if t.id in seen_tids: continue
                 seen_tids.add(t.id)
                 my_tours.append({"tid": t.id, "name": t.name, "status": t.status,
+                                 "display_status": t.status,
                                  "game_type": t.game_type, "my_status": "creator",
                                  "prize": t.prize or ""})
 
             if is_admin:
                 r = await s.execute(select(Tournament).where(
-                    Tournament.game_type == "wheel",
+                    Tournament.game_type.in_(("wheel", "wheel_1v1")),
                     Tournament.status.in_(("running", "paused"))))
                 for t in r.scalars().all():
                     if t.id in seen_tids: continue
                     seen_tids.add(t.id)
                     my_tours.append({"tid": t.id, "name": t.name, "status": t.status,
+                                     "display_status": t.status,
                                      "game_type": t.game_type, "my_status": "admin",
                                      "prize": t.prize or ""})
 
@@ -199,19 +200,22 @@ def create_app(bot):
             if not t: raise HTTPException(status_code=404, detail="Not found")
             r = await s.execute(select(Participant).where(
                 Participant.tournament_id == tid, Participant.user_id == user_id,
-                Participant.status.in_(("approved", "winner"))))
+                Participant.status.in_(("approved", "winner", "pending"))))
             p = r.scalar_one_or_none()
             is_creator = (t.creator_id == user_id)
             is_admin = is_creator or ((await s.execute(select(Admin).where(
                 Admin.user_id == user_id))).scalar_one_or_none() is not None)
-            is_participant = p is not None
-            if not is_participant and not is_admin:
+            is_participant = p is not None and p.status in ("approved", "winner")
+            is_pending = p is not None and p.status == "pending"
+            if not is_participant and not is_admin and not is_pending:
                 raise HTTPException(status_code=403, detail="Not a participant")
+            my_status = p.status if p else "creator"
         return {"id": t.id, "name": t.name, "game_type": t.game_type,
                 "access_type": t.access_type, "status": t.status,
                 "prize": t.prize, "user_id": user_id,
                 "min_players": t.min_players,
-                "is_admin": is_admin, "is_participant": is_participant}
+                "is_admin": is_admin, "is_participant": is_participant,
+                "is_pending": is_pending, "my_status": my_status}
 
     @app.websocket("/ws/{tid}")
     async def ws_endpoint(websocket: WebSocket, tid: int):
@@ -251,6 +255,17 @@ def create_app(bot):
         if t.game_type == "poker":
             g = gm.get_poker(tid)
             if g: state = g.to_dict(for_user_id=user_id)
+        elif t.game_type == "wheel_1v1":
+            g = gm.get_wheel_1v1(tid)
+            if g: state = g.to_dict()
+            else:
+                # Ещё не создана — ждём принятия приглашения
+                state = {"type": "wheel_1v1_state", "tid": tid,
+                         "players": [], "ready": [], "spin_count": 0,
+                         "finished": False, "winner": None,
+                         "prize": t.prize or "🏆 Приз", "last_spin": None,
+                         "waiting": True,
+                         "server_now": int(time.time() * 1000)}
         else:
             g = gm.get_wheel(tid)
             if g: state = g.to_dict()
@@ -276,6 +291,8 @@ async def _handle(bot, ws, tid, user_id, msg, t, is_admin):
         await ws.send_json({"type": "pong"}); return
     if mtype == "leave_tournament":
         await _handle_leave(ws, tid, user_id, t); return
+    if mtype == "ready" and t.game_type == "wheel_1v1":
+        await _handle_1v1_ready(bot, tid, user_id); return
     if is_admin and mtype == "admin_end_tournament":
         await _admin_end(bot, tid); return
     if is_admin and mtype == "admin_pause_tournament":
@@ -297,13 +314,30 @@ async def _handle(bot, ws, tid, user_id, msg, t, is_admin):
             g.start_hand(); await _broadcast_poker(tid, g)
         elif mtype == "request_state":
             await ws.send_json(g.to_dict(for_user_id=user_id))
+    elif t.game_type == "wheel_1v1":
+        g = gm.get_wheel_1v1(tid)
+        if not g: return
+        if mtype == "spin":
+            if not is_admin:
+                try: await ws.send_json({"type": "spin_denied"})
+                except: pass
+                return
+            if not g.both_ready():
+                try: await ws.send_json({"type": "not_ready"})
+                except: pass
+                return
+            if not g.finished:
+                g.spin()
+                await gm.broadcast(tid, g.to_dict())
+        elif mtype == "request_state":
+            await ws.send_json(g.to_dict())
     else:
         g = gm.get_wheel(tid)
         if not g: return
         if mtype == "spin":
             if not is_admin:
                 try: await ws.send_json({"type": "spin_denied"})
-                except Exception: pass
+                except: pass
                 return
             g.spin()
             await gm.broadcast(tid, g.to_dict())
@@ -311,9 +345,27 @@ async def _handle(bot, ws, tid, user_id, msg, t, is_admin):
             await ws.send_json(g.to_dict())
 
 
+async def _handle_1v1_ready(bot, tid, user_id):
+    g = gm.get_wheel_1v1(tid)
+    if not g or g.finished: return
+    if user_id not in g.user_ids(): return
+    if g.press_ready(user_id):
+        # Рассылаем обновлённый state (у игроков появится галочка)
+        await gm.broadcast(tid, g.to_dict())
+        if g.both_ready():
+            # Оба готовы → через 1.5 сек крутим
+            async def _auto_spin():
+                await asyncio.sleep(1.5)
+                if g.finished: return
+                g.spin()
+                await gm.broadcast(tid, g.to_dict())
+            asyncio.create_task(_auto_spin())
+
+
 async def _admin_end(bot, tid):
     from main import _finalize_tournament, _finalized_tids
     gm._active_poker.pop(tid, None); gm._active_wheel.pop(tid, None)
+    gm._active_wheel_1v1.pop(tid, None)
     _finalized_tids.discard(tid)
     try: await _finalize_tournament(bot, tid, manual=True)
     except Exception as e: logging.exception("admin_end fail: %s", e)
@@ -346,7 +398,7 @@ async def _admin_kick(tid, t, target_uid):
                             pl.place = len(alive) + 1
                         break
             await _broadcast_poker(tid, g)
-    else:
+    elif t.game_type == "wheel":
         g = gm.get_wheel(tid)
         if g:
             for a in list(g.active):
@@ -377,7 +429,7 @@ async def _handle_leave(ws, tid, user_id, t):
                             pl.place = len(alive) + 1
                         break
             await _broadcast_poker(tid, g)
-    else:
+    elif t.game_type == "wheel":
         g = gm.get_wheel(tid)
         if g:
             for a in list(g.active):
@@ -388,7 +440,7 @@ async def _handle_leave(ws, tid, user_id, t):
                 g.winner = g.active[0]; g.winner["place"] = 1; g.finished = True
             await gm.broadcast(tid, g.to_dict())
     try: await ws.send_json({"type": "left_tournament"})
-    except Exception: pass
+    except: pass
 
 
 async def _broadcast_poker(tid, g):
@@ -396,3 +448,4 @@ async def _broadcast_poker(tid, g):
     for ws in gm._connections[tid]:
         try: await ws.send_json(g.to_dict())
         except Exception: gm.disconnect(tid, ws)
+        
