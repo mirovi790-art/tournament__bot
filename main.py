@@ -1385,8 +1385,6 @@ async def _do_kick_player(bot, tid, t, uid, participant_row):
                     logging.warning("auto-advance notify fail: %s", e)
             await gm.broadcast(tid, g.to_dict())
 
-    gm.room_presence_clear_user(tid, uid)
-
     try:
         await bot.send_message(uid,
             f"<b>🚫 Вас исключили из турнира</b>\n{SEP}\n"
