@@ -297,7 +297,7 @@ document.querySelectorAll(".room-tab").forEach(t => {
     t.classList.add("active");
     if(ACTIVE_ROOM_TAB === "bracket"){
       hide(els.roomContent); show(els.bracketContent);
-      if(LAST_STATE && LAST_STATE.type === "bracket_state") renderBracket(LAST_STATE);
+      if(LAST_STATE && LAST_STATE.type === "bracket_state") drawBracketUI(LAST_STATE);
     } else {
       hide(els.bracketContent); show(els.roomContent);
       if(LAST_STATE && LAST_STATE.type === "bracket_state"){
@@ -541,28 +541,28 @@ function _showEndedModal(msg){
 // ================== BRACKET ==================
 function renderBracket(s){
   LAST_STATE = s;
-  if(ACTIVE_ROOM_TAB === "bracket"){
-    if(BRACKET_ACTIVE_MATCH_ID){
-      renderBracketRoom(s, BRACKET_ACTIVE_MATCH_ID);
-    } else {
+  if(BRACKET_ACTIVE_MATCH_ID){
+    // пользователь в конкретной комнате
+    if(ACTIVE_ROOM_TAB === "bracket"){
+      // он на вкладке "Сетка", но всё ещё "в комнате" — покажем сетку, а если вернётся на "Комната", вернёмся в комнату
       drawBracketUI(s);
+    } else {
+      renderBracketRoom(s, BRACKET_ACTIVE_MATCH_ID);
     }
   } else {
-    // вкладка "Комната"
-    if(BRACKET_ACTIVE_MATCH_ID){
-      renderBracketRoom(s, BRACKET_ACTIVE_MATCH_ID);
-    } else {
-      drawBracketRoomsList(s);
-    }
+    if(ACTIVE_ROOM_TAB === "bracket") drawBracketUI(s);
+    else drawBracketRoomsList(s);
   }
 }
 
 function findMatch(s, match_id){
+  if(!s || !s.rounds) return null;
   for(const rnd of s.rounds) for(const m of rnd) if(m.match_id === match_id) return m;
   return null;
 }
 
 function findMyActiveMatch(s){
+  if(!s || !s.rounds) return null;
   for(const rnd of s.rounds) for(const m of rnd){
     if(m.finished) continue;
     if(m.p1 && m.p1.user_id === MY_ID) return m;
@@ -663,15 +663,26 @@ function drawBracketRoomsList(s){
 
 function openBracketRoom(mid){
   BRACKET_ACTIVE_MATCH_ID = mid;
-  BRACKET_MATCH_VIEW_STATE[mid] = "idle";
-  if(LAST_STATE){
-    const mm = findMatch(LAST_STATE, mid);
-    BRACKET_MATCH_LAST_SPIN_SHOWN[mid] = mm ? (mm.spin_count || 0) : 0;
+  BRACKET_MATCH_VIEW_STATE[mid] = null;
+
+  // Умный старт: если спин уже идёт — дать клиенту его догнать
+  const mm = LAST_STATE ? findMatch(LAST_STATE, mid) : null;
+  if(mm && mm.last_spin){
+    const now = nowServer();
+    const spinEndsAt = (mm.last_spin.started_at || 0) + (mm.last_spin.duration || 20000);
+    if(now < spinEndsAt){
+      // спин ещё крутится → анимируем с текущего момента
+      BRACKET_MATCH_LAST_SPIN_SHOWN[mid] = (mm.spin_count || 1) - 1;
+    } else {
+      BRACKET_MATCH_LAST_SPIN_SHOWN[mid] = mm.spin_count || 0;
+    }
   } else {
     BRACKET_MATCH_LAST_SPIN_SHOWN[mid] = 0;
   }
+
   wsSend({type: "bracket_enter", match_id: mid});
-  // Переключаем вкладку на "Комната"
+
+  // Переходим на вкладку «Комната»
   ACTIVE_ROOM_TAB = "main";
   document.querySelectorAll(".room-tab").forEach(x => x.classList.remove("active"));
   const mainTab = document.querySelector('.room-tab[data-rtab="main"]');
@@ -681,9 +692,17 @@ function openBracketRoom(mid){
 }
 
 function closeBracketRoom(){
+  const oldMid = BRACKET_ACTIVE_MATCH_ID;
+  if(oldMid && BRACKET_MATCH_VIEW_TIMER[oldMid]){
+    try{ clearTimeout(BRACKET_MATCH_VIEW_TIMER[oldMid]); }catch(e){}
+    BRACKET_MATCH_VIEW_TIMER[oldMid] = null;
+  }
+  if(oldMid && BRACKET_MATCH_VIEW_ANIM[oldMid]){
+    try{ cancelAnimationFrame(BRACKET_MATCH_VIEW_ANIM[oldMid]); }catch(e){}
+    BRACKET_MATCH_VIEW_ANIM[oldMid] = null;
+  }
   BRACKET_ACTIVE_MATCH_ID = null;
   BRACKET_MATCH_VIEW_STATE = {};
-  // Возвращаемся на список комнат
   if(LAST_STATE) drawBracketRoomsList(LAST_STATE);
 }
 
@@ -780,7 +799,6 @@ function renderBracketPlayer(m, p, readyList, finished, winner, isMyMatch, wins)
   const isLoser = finished && winner && winner.user_id !== p.user_id;
   const isMe = p.user_id === MY_ID;
   let cls = "bracket-player";
-  // Подсветка победителя/проигравшего — ТОЛЬКО когда серия завершена
   if(finished && isWinner) cls += " winner";
   else if(finished && isLoser) cls += " loser";
 
@@ -792,9 +810,6 @@ function renderBracketPlayer(m, p, readyList, finished, winner, isMyMatch, wins)
   if(isMe && isReady) disabled = "disabled";
   if(isMe) checkCls += " mine"; else checkCls += " notmine";
 
-  // Счёт в сетке показываем ТОЛЬКО когда серия уже имеет завершённые спины.
-  // Так как сервер увеличивает p1_wins/p2_wins только после анимации,
-  // здесь они уже финальные и корректные.
   let scoreText = "";
   if(m.series_target && m.series_target > 1){
     const myWins = (p.user_id === (m.p1 && m.p1.user_id)) ? (m.p1_wins||0) : (m.p2_wins||0);
@@ -814,43 +829,41 @@ function renderBracketPlayer(m, p, readyList, finished, winner, isMyMatch, wins)
 /* ============= BRACKET ROOM ============= */
 function renderBracketRoom(s, match_id){
   const m = findMatch(s, match_id);
-  if(!m){ BRACKET_ACTIVE_MATCH_ID = null; drawBracketRoomsList(s); return; }
+  if(!m){
+    // матч исчез (удалён) — выходим
+    BRACKET_ACTIVE_MATCH_ID = null;
+    BRACKET_MATCH_VIEW_STATE[match_id] = null;
+    if(ACTIVE_ROOM_TAB === "bracket") drawBracketUI(s);
+    else drawBracketRoomsList(s);
+    return;
+  }
 
-  const state = BRACKET_MATCH_VIEW_STATE[match_id] || "idle";
+  const state = BRACKET_MATCH_VIEW_STATE[match_id];
+  // Идёт анимация — не мешаем
+  if(state === "spinning") return;
+  // Показывается результат — таймер сам всё разрулит
+  if(state === "showing_result") return;
+
   const lastShown = BRACKET_MATCH_LAST_SPIN_SHOWN[match_id] || 0;
   const hasNewSpin = m.last_spin && m.spin_count > lastShown;
-
-  if(state === "spinning") return;
-  if(state === "result_round" || state === "result_final") return;
 
   if(hasNewSpin){
     BRACKET_MATCH_LAST_SPIN_SHOWN[match_id] = m.spin_count;
     BRACKET_MATCH_VIEW_STATE[match_id] = "spinning";
     clearBracketTimer(match_id);
     animateBracketSpin(s, m, () => {
-      if(m.finished){
-        BRACKET_MATCH_VIEW_STATE[match_id] = "result_final";
-        drawBracketRoomFinalResult(m);
-        BRACKET_MATCH_VIEW_TIMER[match_id] = setTimeout(() => {
-          BRACKET_MATCH_VIEW_STATE[match_id] = "idle";
-          BRACKET_ACTIVE_MATCH_ID = null;
-          if(LAST_STATE) drawBracketRoomsList(LAST_STATE);
-        }, 7000);
-      } else {
-        BRACKET_MATCH_VIEW_STATE[match_id] = "result_round";
-        drawBracketRoomRoundResult(m);
-        BRACKET_MATCH_VIEW_TIMER[match_id] = setTimeout(() => {
-          BRACKET_MATCH_VIEW_STATE[match_id] = "idle";
-          if(LAST_STATE) renderBracketRoom(LAST_STATE, match_id);
-        }, 3500);
-      }
+      // Дадим серверу 1 сек, чтобы он прислал финализированное состояние
+      setTimeout(() => {
+        if(BRACKET_ACTIVE_MATCH_ID !== match_id) return;
+        showMatchResult(match_id);
+      }, 1000);
     });
     return;
   }
 
+  // Матч уже завершён, а мы только что вошли — показать финал
   if(m.finished){
-    BRACKET_MATCH_VIEW_STATE[match_id] = "result_final";
-    drawBracketRoomFinalResult(m);
+    showMatchResult(match_id);
     return;
   }
 
@@ -861,6 +874,50 @@ function clearBracketTimer(match_id){
   if(BRACKET_MATCH_VIEW_TIMER[match_id]){
     try{ clearTimeout(BRACKET_MATCH_VIEW_TIMER[match_id]); }catch(e){}
     BRACKET_MATCH_VIEW_TIMER[match_id] = null;
+  }
+}
+
+/**
+ * Показывает результат текущего спина. Читает свежий LAST_STATE,
+ * потому что к этому моменту сервер уже отправил финализацию.
+ */
+function showMatchResult(match_id){
+  const s = LAST_STATE;
+  if(!s){ return; }
+  const m = findMatch(s, match_id);
+  if(!m){
+    BRACKET_ACTIVE_MATCH_ID = null;
+    BRACKET_MATCH_VIEW_STATE[match_id] = null;
+    drawBracketUI(s);
+    return;
+  }
+
+  BRACKET_MATCH_VIEW_STATE[match_id] = "showing_result";
+  clearBracketTimer(match_id);
+
+  if(m.finished){
+    // Финал серии → 7 сек показать → перевести на вкладку «Сетка»
+    drawBracketRoomFinalResult(m);
+    BRACKET_MATCH_VIEW_TIMER[match_id] = setTimeout(() => {
+      if(BRACKET_ACTIVE_MATCH_ID !== match_id) return;
+      BRACKET_MATCH_VIEW_STATE[match_id] = null;
+      BRACKET_ACTIVE_MATCH_ID = null;
+      // переключаемся на вкладку «Сетка турнира»
+      ACTIVE_ROOM_TAB = "bracket";
+      document.querySelectorAll(".room-tab").forEach(x => x.classList.remove("active"));
+      const bt = document.querySelector('.room-tab[data-rtab="bracket"]');
+      if(bt) bt.classList.add("active");
+      hide(els.roomContent); show(els.bracketContent);
+      if(LAST_STATE) drawBracketUI(LAST_STATE);
+    }, 7000);
+  } else {
+    // Промежуточная победа в серии → 3.5 сек → вернуться в комнату
+    drawBracketRoomRoundResult(m);
+    BRACKET_MATCH_VIEW_TIMER[match_id] = setTimeout(() => {
+      if(BRACKET_ACTIVE_MATCH_ID !== match_id) return;
+      BRACKET_MATCH_VIEW_STATE[match_id] = null;
+      if(LAST_STATE) renderBracketRoom(LAST_STATE, match_id);
+    }, 3500);
   }
 }
 
@@ -970,7 +1027,7 @@ function drawBracketRoomFinalResult(m){
     <div class="waiting-txt">${title}</div>
     <div style="color:#cbd5e1;font-size:15px;margin-top:8px;">Финальный счёт серии: <b>${p1w}:${p2w}</b></div>
     <div style="color:#94a3b8;font-size:13px;margin-top:8px;">Серия завершена.</div>
-    <div style="color:#fbbf24;font-size:13px;margin-top:12px;">Автовыход через <span id="br-exit-cd">7</span>…</div>
+    <div style="color:#fbbf24;font-size:13px;margin-top:12px;">Возврат к сетке через <span id="br-exit-cd">7</span>…</div>
   </div>`;
   let sec = 7;
   const tick = setInterval(() => {
@@ -1015,21 +1072,26 @@ function animateBracketSpin(s, m, onDone){
     return;
   }
 
+  const mid = m.match_id;
   function frame(){
+    if(BRACKET_ACTIVE_MATCH_ID !== mid){
+      // вышли из комнаты — прерываем анимацию
+      return;
+    }
     const elapsed = nowServer() - serverStart;
     const k = Math.min(1, Math.max(0, elapsed / duration));
     const eased = 1 - Math.pow(1 - k, 4);
     WHEEL_ANGLE = startAngle + (target - startAngle) * eased;
     drawBracketWheelDynamic(canvas, players);
     if(k < 1){
-      BRACKET_MATCH_VIEW_ANIM[m.match_id] = requestAnimationFrame(frame);
+      BRACKET_MATCH_VIEW_ANIM[mid] = requestAnimationFrame(frame);
     } else {
       WHEEL_ANGLE = target;
       drawBracketWheelDynamic(canvas, players);
       if(onDone) onDone();
     }
   }
-  BRACKET_MATCH_VIEW_ANIM[m.match_id] = requestAnimationFrame(frame);
+  BRACKET_MATCH_VIEW_ANIM[mid] = requestAnimationFrame(frame);
 }
 
 function drawBracketWheelStatic(canvas, p1, p2){
@@ -1066,9 +1128,9 @@ function drawBracketWheelDynamic(canvas, players){
     ctx.shadowColor = col.glow; ctx.shadowBlur = 12;
     ctx.beginPath(); ctx.moveTo(cx, cy); ctx.lineTo(cx + r*Math.cos(a0), cy + r*Math.sin(a0));
     ctx.stroke(); ctx.restore();
-    const mid = (a0 + a1) / 2;
+    const mid2 = (a0 + a1) / 2;
     ctx.save();
-    ctx.translate(cx, cy); ctx.rotate(mid);
+    ctx.translate(cx, cy); ctx.rotate(mid2);
     ctx.textAlign = "right"; ctx.textBaseline = "middle";
     ctx.shadowColor = "rgba(0,0,0,.9)"; ctx.shadowBlur = 6;
     ctx.shadowOffsetX = 2; ctx.shadowOffsetY = 2;
