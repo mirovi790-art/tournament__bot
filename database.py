@@ -48,6 +48,7 @@ class Tournament(Base):
     blind_interval: Mapped[int] = mapped_column(Integer, default=5)
     min_players: Mapped[int] = mapped_column(Integer, default=2)
     bracket_size: Mapped[int] = mapped_column(Integer, default=0)
+    series_target: Mapped[int] = mapped_column(Integer, default=3)
     auto_start_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     prize: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
@@ -78,5 +79,7 @@ async def init_db():
                 await conn.exec_driver_sql("ALTER TABLE tournaments ADD COLUMN bracket_size INTEGER DEFAULT 0")
             if "auto_start_at" not in cols:
                 await conn.exec_driver_sql("ALTER TABLE tournaments ADD COLUMN auto_start_at DATETIME")
+            if "series_target" not in cols:
+                await conn.exec_driver_sql("ALTER TABLE tournaments ADD COLUMN series_target INTEGER DEFAULT 3")
         except Exception:
             pass
