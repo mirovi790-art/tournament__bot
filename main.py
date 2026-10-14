@@ -17,29 +17,28 @@ from aiogram.types import (Message, CallbackQuery, InlineKeyboardMarkup,
 from dotenv import load_dotenv
 from sqlalchemy import select, func
 
-# ============== SAFE MONKEY-PATCH для callback.answer ==============
-# Telegram возвращает BadRequest, если callback старше 15 минут.
-# Мы глотаем эту ошибку, чтобы не ронять хендлеры.
+# ============== SAFE MONKEY-PATCH для CallbackQuery.answer ==============
 _original_cb_answer = CallbackQuery.answer
 
 async def _safe_cb_answer(self, text=None, show_alert=False, *args, **kwargs):
     try:
         return await _original_cb_answer(self, text, show_alert, *args, **kwargs)
     except TelegramBadRequest as e:
-        if "query is too old" in str(e) or "query ID is invalid" in str(e):
-            logging.debug("Suppressed stale cb.answer: %s", e)
+        s = str(e)
+        if "query is too old" in s or "query ID is invalid" in s:
+            return None
+        if "message is not modified" in s:
             return None
         logging.warning("cb.answer TelegramBadRequest: %s", e)
         return None
-    except TelegramForbiddenError as e:
-        logging.debug("cb.answer Forbidden: %s", e)
+    except TelegramForbiddenError:
         return None
     except Exception as e:
         logging.warning("cb.answer unexpected: %s", e)
         return None
 
 CallbackQuery.answer = _safe_cb_answer
-# ====================================================================
+# ========================================================================
 
 from database import (init_db, SessionLocal, User, Admin, Ban, Tournament,
                        Participant)
@@ -58,13 +57,26 @@ WEBAPP_URL = os.getenv("WEBAPP_URL", "http://localhost:8000").rstrip("/")
 HOST = os.getenv("HOST", "0.0.0.0")
 PORT = int(os.getenv("PORT", "8000"))
 SEP = "➖➖➖➖➖➖➖➖➖"
-logging.basicConfig(level=logging.INFO)
+
+logging.basicConfig(level=logging.INFO,
+                    format="%(levelname)s:%(name)s:%(message)s")
+# Убираем шум от "Update ... not handled"
+logging.getLogger("aiogram.event").setLevel(logging.WARNING)
+
 router = Router()
 _finalized_tids = set()
 _bg_tasks: set[asyncio.Task] = set()
 VALID_BRACKET_SIZES = [4, 8, 16, 32]
 VALID_SERIES_TARGETS = [1, 2, 3]
 MAX_ACTIVE_TOURNAMENTS_PER_ADMIN = 5
+
+# Все reply-кнопки главных меню — их можно нажимать из любого FSM-состояния
+MENU_BUTTONS = {
+    "🏆 Турниры", "👤 Профиль", "🆕 Создать турнир", "ℹ️ Помощь",
+    "👑 Админство", "🔍 Найти игрока", "⬅️ В главное меню",
+    "🌐 Открытые турниры", "🎟 Мои турниры", "📂 Созданные мной",
+    "📊 Все активные турниры", "📋 Список админов", "🚫 Черный список",
+}
 
 
 def _spawn(coro):
@@ -78,7 +90,9 @@ def esc(s): return html.escape(s or "")
 
 
 async def _safe_edit(cb: CallbackQuery, text: str, **kwargs):
-    """Безопасное редактирование: не падает на старых сообщениях."""
+    if cb.message is None:
+        try: await cb.bot.send_message(cb.from_user.id, text, **kwargs); return True
+        except Exception: return False
     try:
         await cb.message.edit_text(text, **kwargs)
         return True
@@ -87,9 +101,11 @@ async def _safe_edit(cb: CallbackQuery, text: str, **kwargs):
         if "message is not modified" in s:
             return True
         if "message to edit not found" in s or "message can't be edited" in s:
-            try: await cb.message.answer(text, **kwargs); return True
+            try: await cb.bot.send_message(cb.from_user.id, text, **kwargs); return True
             except Exception: return False
-        logging.debug("safe_edit suppressed: %s", e)
+        if "query is too old" in s or "query ID is invalid" in s:
+            return False
+        logging.debug("safe_edit: %s", e)
         return False
     except Exception as e:
         logging.debug("safe_edit error: %s", e)
@@ -355,9 +371,10 @@ def _help_text():
             "<b>🏆 Турнир:</b>\n"
             "▫️ 4/8/16/32 игрока в плей-офф.\n"
             "▫️ Серия побед настраивается (1/2/3).\n\n"
-            "<blockquote>🎯 Кнопки внизу.</blockquote>")
+            "<blockquote>🎯 Команды: /start /menu /cancel /help</blockquote>")
 
 
+# ============ БАЗОВЫЕ КОМАНДЫ (работают ВСЕГДА) ============
 @router.message(CommandStart())
 async def cmd_start(message: Message, state: FSMContext):
     await state.clear()
@@ -373,7 +390,6 @@ async def cmd_start(message: Message, state: FSMContext):
 
 
 @router.message(Command("menu"))
-@router.message(StateFilter(None), F.text.lower() == "меню")
 async def cmd_menu(message: Message, state: FSMContext):
     await state.clear()
     if await _check_ban(message.from_user.id):
@@ -384,33 +400,53 @@ async def cmd_menu(message: Message, state: FSMContext):
                          reply_markup=reply_main_menu(message.from_user.id, is_adm))
 
 
+@router.message(Command("cancel"))
+@router.message(Command("reset"))
+async def cmd_cancel(message: Message, state: FSMContext):
+    cur = await state.get_state()
+    await state.clear()
+    if await _check_ban(message.from_user.id):
+        await message.answer("<blockquote>⛔ Заблокированы!</blockquote>"); return
+    is_adm = await _is_admin(message.from_user.id)
+    prefix = "❌ Действие отменено.\n\n" if cur else ""
+    await message.answer(prefix + "🏠 <b>Главное меню</b>",
+                         reply_markup=reply_main_menu(message.from_user.id, is_adm))
+
+
 @router.message(Command("help"))
 async def cmd_help(message: Message): await message.answer(_help_text())
 
 
 @router.message(Command("owner"))
-async def cmd_owner(message: Message):
+async def cmd_owner(message: Message, state: FSMContext):
+    await state.clear()
     if message.from_user.id != OWNER_ID:
         await message.answer("<blockquote>⛔ Владелец.</blockquote>"); return
     await message.answer(f"<b>👑 ВЛАДЕЛЕЦ</b>\n{SEP}", reply_markup=owner_menu_kb())
 
 
 @router.message(Command("admin"))
-async def cmd_admin(message: Message):
+async def cmd_admin(message: Message, state: FSMContext):
+    await state.clear()
     if not await _is_admin(message.from_user.id):
         await message.answer("<blockquote>⛔ Админы.</blockquote>"); return
     await message.answer(f"<b>🛠 АДМИН</b>\n{SEP}", reply_markup=owner_menu_kb())
 
 
-@router.message(StateFilter(None), F.text == "🏆 Турниры")
-async def txt_tournaments(message: Message):
+# ============ ГЛОБАЛЬНЫЕ МЕНЮ-КНОПКИ (работают из ЛЮБОГО FSM-состояния) ============
+# ВАЖНО: они идут ДО state-хендлеров, чтобы перехватывать клики
+
+@router.message(F.text == "🏆 Турниры")
+async def txt_tournaments(message: Message, state: FSMContext):
+    await state.clear()
     is_adm = await _is_admin(message.from_user.id)
     await message.answer("🏆 <b>Раздел турниров</b>\n\n⬇️",
                          reply_markup=reply_tournaments_menu(message.from_user.id, is_adm))
 
 
-@router.message(StateFilter(None), F.text == "👤 Профиль")
-async def txt_profile(message: Message):
+@router.message(F.text == "👤 Профиль")
+async def txt_profile(message: Message, state: FSMContext):
+    await state.clear()
     async with SessionLocal() as s:
         u = await s.get(User, message.from_user.id)
         if u is None:
@@ -430,120 +466,45 @@ async def txt_profile(message: Message):
         f"🎭 Роль: {role}\n🏆 Побед: <code>{wins}</code>")
 
 
-@router.message(StateFilter(None), F.text == "🆕 Создать турнир")
-async def txt_create(message: Message, state: FSMContext):
-    if not await _is_admin(message.from_user.id):
-        await message.answer("⛔ Только админ — @Dimo0nchik"); return
-    active_count = await _active_tournaments_count(message.from_user.id)
-    if active_count >= MAX_ACTIVE_TOURNAMENTS_PER_ADMIN:
-        await message.answer(
-            f"<blockquote>⛔ У тебя уже <b>{active_count}</b> активных турниров "
-            f"(максимум {MAX_ACTIVE_TOURNAMENTS_PER_ADMIN}).<br><br>"
-            "Заверши или удали один, прежде чем создавать новый.</blockquote>")
-        return
-    await state.clear(); await state.set_state(TournamentFSM.access_type)
-    await message.answer(
-        f"<b>🆕 Шаг 1</b>\n{SEP}\nДоступ:\n"
-        f"<i>(Активных турниров: {active_count}/{MAX_ACTIVE_TOURNAMENTS_PER_ADMIN})</i>",
-        reply_markup=access_type_kb())
+@router.message(F.text == "ℹ️ Помощь")
+async def txt_help(message: Message, state: FSMContext):
+    await state.clear()
+    await message.answer(_help_text())
 
 
-@router.message(StateFilter(None), F.text == "👑 Админство")
-async def txt_adm_owner(message: Message):
-    if message.from_user.id != OWNER_ID:
-        await message.answer("⛔ Владелец."); return
-    await message.answer(f"<b>👑 АДМИНСТВО</b>\n{SEP}", reply_markup=owner_menu_kb())
-
-
-@router.message(StateFilter(None), F.text == "🔍 Найти игрока")
-async def txt_find_player(message: Message, state: FSMContext):
-    if message.from_user.id != OWNER_ID:
-        await message.answer("⛔ Только для владельца."); return
-    await state.clear(); await state.set_state(FindPlayerFSM.query)
-    await message.answer(
-        f"<b>🔍 ПОИСК ИГРОКА</b>\n{SEP}\n"
-        "Отправь <b>Telegram ID</b> или <b>@username</b> игрока.\n\n"
-        "<blockquote>Чтобы выйти — нажми ⬅️ В главное меню.</blockquote>",
-        reply_markup=ReplyKeyboardMarkup(
-            keyboard=[[KeyboardButton(text="⬅️ В главное меню")]], resize_keyboard=True))
-
-
-@router.message(FindPlayerFSM.query)
-async def msg_find_player(message: Message, state: FSMContext):
-    if message.from_user.id != OWNER_ID: return
-    raw = message.text.strip()
-    if raw == "⬅️ В главное меню":
-        await state.clear()
-        is_adm = await _is_admin(message.from_user.id)
-        await message.answer("🏠 <b>Главное меню</b>",
-                             reply_markup=reply_main_menu(message.from_user.id, is_adm))
-        return
-    target_id = None
-    async with SessionLocal() as s:
-        if raw.startswith("@"):
-            r = await s.execute(select(User).where(User.username == raw[1:]))
-            u = r.scalar_one_or_none()
-            if u: target_id = u.id
-        else:
-            try: target_id = int(raw)
-            except ValueError: target_id = None
-        if target_id is None:
-            await message.answer("<blockquote>❌ Не найден.</blockquote>"); return
-        u = await s.get(User, target_id)
-        if not u:
-            await message.answer("<blockquote>❌ Нет в базе.</blockquote>"); return
-        wins = (await s.execute(select(func.count()).select_from(Participant)
-            .where(Participant.user_id == target_id,
-                   Participant.status == "winner"))).scalar() or 0
-        total_participated = (await s.execute(select(func.count()).select_from(Participant)
-            .where(Participant.user_id == target_id,
-                   Participant.status.in_(("approved", "winner"))))).scalar() or 0
-        is_adm_db = (await s.execute(select(Admin).where(
-            Admin.user_id == target_id))).scalar_one_or_none() is not None
-        is_banned = (await s.get(Ban, target_id)) is not None
-        active_parts = (await s.execute(select(Participant).where(
-            Participant.user_id == target_id,
-            Participant.status.in_(("approved", "winner"))))).scalars().all()
-        active_tours = []
-        for p in active_parts:
-            t = await s.get(Tournament, p.tournament_id)
-            if t and t.status in ("registration", "running", "paused"):
-                active_tours.append({"name": t.name, "status": t.status, "game": t.game_type})
-    role = ("👑 Создатель" if target_id == OWNER_ID else
-            ("🛠 Администратор" if is_adm_db else "🎮 Игрок"))
-    ban_label = "🚫 ЗАБАНЕН" if is_banned else "✅ Активен"
-    uname = f"@{u.username}" if u.username else "—"
-    lines = ["<b>🔍 ПРОФИЛЬ ИГРОКА</b>", SEP,
-             f"🆔 <b>ID:</b> <code>{target_id}</code>",
-             f"👤 <b>Имя:</b> {esc(u.first_name or '—')}",
-             f"🌐 <b>Username:</b> {uname}",
-             f"🎭 <b>Роль:</b> {role}",
-             f"📊 <b>Статус:</b> {ban_label}",
-             SEP, f"🏆 <b>Побед:</b> <code>{wins}</code>",
-             f"🎮 <b>Участий:</b> <code>{total_participated}</code>",
-             f"📅 <b>В боте с:</b> {u.created_at:%d.%m.%Y}"]
-    if active_tours:
-        lines.append(SEP); lines.append("<b>⚡ Активные турниры:</b>")
-        for t in active_tours:
-            em = "🃏" if t["game"] == "poker" else ("🏰" if "castle" in t["game"] else ("🏆" if t["game"] == "bracket" else "🎡"))
-            lines.append(f"  {em} {esc(t['name'])} · <code>{t['status']}</code>")
-    lines.append(""); lines.append("<blockquote>Можешь ввести ещё игрока или нажать ⬅️</blockquote>")
-    await message.answer("\n".join(lines))
-
-
-@router.message(StateFilter(None), F.text == "ℹ️ Помощь")
-async def txt_help(message: Message): await message.answer(_help_text())
-
-
-@router.message(StateFilter(None), F.text == "⬅️ В главное меню")
-async def txt_back_main(message: Message):
+@router.message(F.text == "⬅️ В главное меню")
+async def txt_back_main(message: Message, state: FSMContext):
+    await state.clear()
     is_adm = await _is_admin(message.from_user.id)
     await message.answer("🏠 <b>Главное меню</b>",
                          reply_markup=reply_main_menu(message.from_user.id, is_adm))
 
 
-@router.message(StateFilter(None), F.text == "🌐 Открытые турниры")
-async def txt_open(message: Message):
+@router.message(F.text == "👑 Админство")
+async def txt_adm_owner(message: Message, state: FSMContext):
+    await state.clear()
+    if message.from_user.id != OWNER_ID:
+        await message.answer("⛔ Владелец."); return
+    await message.answer(f"<b>👑 АДМИНСТВО</b>\n{SEP}", reply_markup=owner_menu_kb())
+
+
+@router.message(F.text == "🔍 Найти игрока")
+async def txt_find_player(message: Message, state: FSMContext):
+    await state.clear()
+    if message.from_user.id != OWNER_ID:
+        await message.answer("⛔ Только для владельца."); return
+    await state.set_state(FindPlayerFSM.query)
+    await message.answer(
+        f"<b>🔍 ПОИСК ИГРОКА</b>\n{SEP}\n"
+        "Отправь <b>Telegram ID</b> или <b>@username</b> игрока.\n\n"
+        "<blockquote>Чтобы выйти — /cancel.</blockquote>",
+        reply_markup=ReplyKeyboardMarkup(
+            keyboard=[[KeyboardButton(text="⬅️ В главное меню")]], resize_keyboard=True))
+
+
+@router.message(F.text == "🌐 Открытые турниры")
+async def txt_open(message: Message, state: FSMContext):
+    await state.clear()
     async with SessionLocal() as s:
         r = await s.execute(select(Tournament).where(
             Tournament.access_type == "open", Tournament.status == "registration",
@@ -554,15 +515,16 @@ async def txt_open(message: Message):
     lines = [f"<b>🌐 Открытые турниры</b>\n{SEP}"]; rows = []
     for t in tours:
         emoji = {"poker": "🃏", "bracket": "🏆", "castle_bracket": "🏰"}.get(t.game_type, "🎡")
-        extra = f" · {t.bracket_size} игр. · до {getattr(t, 'series_target', 3)} поб." if t.game_type in ("bracket","castle_bracket") else ""
+        extra = f" · {t.bracket_size} игр." if t.game_type in ("bracket","castle_bracket") else ""
         lines.append(f"{emoji} <b>{esc(t.name)}</b> · <i>{esc(t.prize or '—')}</i>{extra}")
         rows.append([InlineKeyboardButton(text=f"📩 Заявка · {t.name[:20]}",
                                           callback_data=f"apply_{t.id}")])
     await message.answer("\n".join(lines), reply_markup=InlineKeyboardMarkup(inline_keyboard=rows))
 
 
-@router.message(StateFilter(None), F.text == "🎟 Мои турниры")
-async def txt_my(message: Message):
+@router.message(F.text == "🎟 Мои турниры")
+async def txt_my(message: Message, state: FSMContext):
+    await state.clear()
     rows = []; lines = [f"<b>🎟 Мои турниры</b>\n{SEP}"]; has = False; shown = set()
     async with SessionLocal() as s:
         r = await s.execute(select(Participant).where(
@@ -586,8 +548,9 @@ async def txt_my(message: Message):
                          reply_markup=InlineKeyboardMarkup(inline_keyboard=rows) if rows else None)
 
 
-@router.message(StateFilter(None), F.text == "📂 Созданные мной")
-async def txt_created(message: Message):
+@router.message(F.text == "📂 Созданные мной")
+async def txt_created(message: Message, state: FSMContext):
+    await state.clear()
     if not await _is_admin(message.from_user.id):
         await message.answer("⛔ Админы."); return
     async with SessionLocal() as s:
@@ -608,8 +571,9 @@ async def txt_created(message: Message):
     await message.answer("\n".join(lines), reply_markup=InlineKeyboardMarkup(inline_keyboard=rows))
 
 
-@router.message(StateFilter(None), F.text == "📊 Все активные турниры")
-async def txt_all_active(message: Message):
+@router.message(F.text == "📊 Все активные турниры")
+async def txt_all_active(message: Message, state: FSMContext):
+    await state.clear()
     if message.from_user.id != OWNER_ID:
         await message.answer("⛔ Владелец."); return
     async with SessionLocal() as s:
@@ -629,8 +593,9 @@ async def txt_all_active(message: Message):
     await message.answer("\n".join(lines), reply_markup=InlineKeyboardMarkup(inline_keyboard=rows))
 
 
-@router.message(StateFilter(None), F.text == "📋 Список админов")
-async def txt_list_admins(message: Message):
+@router.message(F.text == "📋 Список админов")
+async def txt_list_admins(message: Message, state: FSMContext):
+    await state.clear()
     if message.from_user.id != OWNER_ID:
         await message.answer("⛔ Владелец."); return
     async with SessionLocal() as s:
@@ -642,8 +607,9 @@ async def txt_list_admins(message: Message):
     await message.answer("\n".join(lines))
 
 
-@router.message(StateFilter(None), F.text == "🚫 Черный список")
-async def txt_blacklist(message: Message):
+@router.message(F.text == "🚫 Черный список")
+async def txt_blacklist(message: Message, state: FSMContext):
+    await state.clear()
     if message.from_user.id != OWNER_ID:
         await message.answer("⛔ Владелец."); return
     async with SessionLocal() as s:
@@ -655,6 +621,7 @@ async def txt_blacklist(message: Message):
     await message.answer("\n".join(lines))
 
 
+# ============ OWNER CALLBACKS ============
 @router.callback_query(F.data == "owner_back")
 async def cb_owner_back(cb: CallbackQuery, state: FSMContext):
     if cb.from_user.id != OWNER_ID: await cb.answer("Нет", show_alert=True); return
@@ -795,7 +762,84 @@ async def cb_cancel(cb: CallbackQuery, state: FSMContext):
     await cb.answer()
 
 
-# ========== FSM: Создание турнира ==========
+# ============ FIND PLAYER FSM ============
+@router.message(FindPlayerFSM.query, ~F.text.in_(MENU_BUTTONS))
+async def msg_find_player(message: Message, state: FSMContext):
+    if message.from_user.id != OWNER_ID: return
+    raw = message.text.strip()
+    target_id = None
+    async with SessionLocal() as s:
+        if raw.startswith("@"):
+            r = await s.execute(select(User).where(User.username == raw[1:]))
+            u = r.scalar_one_or_none()
+            if u: target_id = u.id
+        else:
+            try: target_id = int(raw)
+            except ValueError: target_id = None
+        if target_id is None:
+            await message.answer("<blockquote>❌ Не найден.</blockquote>"); return
+        u = await s.get(User, target_id)
+        if not u:
+            await message.answer("<blockquote>❌ Нет в базе.</blockquote>"); return
+        wins = (await s.execute(select(func.count()).select_from(Participant)
+            .where(Participant.user_id == target_id,
+                   Participant.status == "winner"))).scalar() or 0
+        total_participated = (await s.execute(select(func.count()).select_from(Participant)
+            .where(Participant.user_id == target_id,
+                   Participant.status.in_(("approved", "winner"))))).scalar() or 0
+        is_adm_db = (await s.execute(select(Admin).where(
+            Admin.user_id == target_id))).scalar_one_or_none() is not None
+        is_banned = (await s.get(Ban, target_id)) is not None
+        active_parts = (await s.execute(select(Participant).where(
+            Participant.user_id == target_id,
+            Participant.status.in_(("approved", "winner"))))).scalars().all()
+        active_tours = []
+        for p in active_parts:
+            t = await s.get(Tournament, p.tournament_id)
+            if t and t.status in ("registration", "running", "paused"):
+                active_tours.append({"name": t.name, "status": t.status, "game": t.game_type})
+    role = ("👑 Создатель" if target_id == OWNER_ID else
+            ("🛠 Администратор" if is_adm_db else "🎮 Игрок"))
+    ban_label = "🚫 ЗАБАНЕН" if is_banned else "✅ Активен"
+    uname = f"@{u.username}" if u.username else "—"
+    lines = ["<b>🔍 ПРОФИЛЬ ИГРОКА</b>", SEP,
+             f"🆔 <b>ID:</b> <code>{target_id}</code>",
+             f"👤 <b>Имя:</b> {esc(u.first_name or '—')}",
+             f"🌐 <b>Username:</b> {uname}",
+             f"🎭 <b>Роль:</b> {role}",
+             f"📊 <b>Статус:</b> {ban_label}",
+             SEP, f"🏆 <b>Побед:</b> <code>{wins}</code>",
+             f"🎮 <b>Участий:</b> <code>{total_participated}</code>",
+             f"📅 <b>В боте с:</b> {u.created_at:%d.%m.%Y}"]
+    if active_tours:
+        lines.append(SEP); lines.append("<b>⚡ Активные турниры:</b>")
+        for t in active_tours:
+            em = "🃏" if t["game"] == "poker" else ("🏰" if "castle" in t["game"] else ("🏆" if t["game"] == "bracket" else "🎡"))
+            lines.append(f"  {em} {esc(t['name'])} · <code>{t['status']}</code>")
+    lines.append(""); lines.append("<blockquote>Введи ещё или /cancel</blockquote>")
+    await message.answer("\n".join(lines))
+
+
+# ============ FSM: Создание турнира ============
+@router.message(F.text == "🆕 Создать турнир")
+async def txt_create(message: Message, state: FSMContext):
+    await state.clear()
+    if not await _is_admin(message.from_user.id):
+        await message.answer("⛔ Только админ — @Dimo0nchik"); return
+    active_count = await _active_tournaments_count(message.from_user.id)
+    if active_count >= MAX_ACTIVE_TOURNAMENTS_PER_ADMIN:
+        await message.answer(
+            f"<blockquote>⛔ У тебя уже <b>{active_count}</b> активных турниров "
+            f"(максимум {MAX_ACTIVE_TOURNAMENTS_PER_ADMIN}).<br><br>"
+            "Заверши или удали один, прежде чем создавать новый.</blockquote>")
+        return
+    await state.set_state(TournamentFSM.access_type)
+    await message.answer(
+        f"<b>🆕 Шаг 1</b>\n{SEP}\nДоступ:\n"
+        f"<i>(Активных турниров: {active_count}/{MAX_ACTIVE_TOURNAMENTS_PER_ADMIN})</i>",
+        reply_markup=access_type_kb())
+
+
 @router.callback_query(F.data == "tt_access_open")
 async def tt_open(cb: CallbackQuery, state: FSMContext):
     await state.update_data(access_type="open"); await state.set_state(TournamentFSM.game_type)
@@ -874,7 +918,7 @@ async def tt_bracket(cb: CallbackQuery, state: FSMContext):
     await cb.answer()
 
 
-@router.message(TournamentFSM.name)
+@router.message(TournamentFSM.name, ~F.text.in_(MENU_BUTTONS))
 async def tt_name(message: Message, state: FSMContext):
     if not await _is_admin(message.from_user.id): return
     await state.update_data(name=message.text.strip()[:100])
@@ -882,7 +926,7 @@ async def tt_name(message: Message, state: FSMContext):
     await message.answer(f"<b>🆕 Шаг</b>\n{SEP}\nПриз:")
 
 
-@router.message(TournamentFSM.prize)
+@router.message(TournamentFSM.prize, ~F.text.in_(MENU_BUTTONS))
 async def tt_prize(message: Message, state: FSMContext):
     if not await _is_admin(message.from_user.id): return
     await state.update_data(prize=message.text.strip()[:200])
@@ -908,11 +952,10 @@ async def tt_prize(message: Message, state: FSMContext):
         await _show_confirm(message, state)
 
 
-@router.message(TournamentFSM.w1v1_p1)
+@router.message(TournamentFSM.w1v1_p1, ~F.text.in_(MENU_BUTTONS))
 async def tt_w1v1_p1(message: Message, state: FSMContext):
     if not await _is_admin(message.from_user.id): return
-    raw = message.text.strip()
-    uid = await _resolve_uid(raw)
+    uid = await _resolve_uid(message.text.strip())
     if not uid:
         await message.answer("<blockquote>❌ ID или @username.</blockquote>"); return
     await state.update_data(w1v1_p1_id=uid)
@@ -920,11 +963,10 @@ async def tt_w1v1_p1(message: Message, state: FSMContext):
     await message.answer(f"<b>⚔️ Шаг</b>\n{SEP}\nВведи ID/username <b>второго</b> игрока:")
 
 
-@router.message(TournamentFSM.w1v1_p2)
+@router.message(TournamentFSM.w1v1_p2, ~F.text.in_(MENU_BUTTONS))
 async def tt_w1v1_p2(message: Message, state: FSMContext):
     if not await _is_admin(message.from_user.id): return
-    raw = message.text.strip()
-    uid = await _resolve_uid(raw)
+    uid = await _resolve_uid(message.text.strip())
     if not uid:
         await message.answer("<blockquote>❌ ID или @username.</blockquote>"); return
     data = await state.get_data()
@@ -934,11 +976,10 @@ async def tt_w1v1_p2(message: Message, state: FSMContext):
     await _show_confirm(message, state)
 
 
-@router.message(TournamentFSM.castle_p1)
+@router.message(TournamentFSM.castle_p1, ~F.text.in_(MENU_BUTTONS))
 async def tt_castle_p1(message: Message, state: FSMContext):
     if not await _is_admin(message.from_user.id): return
-    raw = message.text.strip()
-    uid = await _resolve_uid(raw)
+    uid = await _resolve_uid(message.text.strip())
     if not uid:
         await message.answer("<blockquote>❌ ID или @username.</blockquote>"); return
     await state.update_data(castle_p1_id=uid)
@@ -946,11 +987,10 @@ async def tt_castle_p1(message: Message, state: FSMContext):
     await message.answer(f"<b>🏰 Шаг</b>\n{SEP}\nВведи ID/username <b>второго</b> игрока:")
 
 
-@router.message(TournamentFSM.castle_p2)
+@router.message(TournamentFSM.castle_p2, ~F.text.in_(MENU_BUTTONS))
 async def tt_castle_p2(message: Message, state: FSMContext):
     if not await _is_admin(message.from_user.id): return
-    raw = message.text.strip()
-    uid = await _resolve_uid(raw)
+    uid = await _resolve_uid(message.text.strip())
     if not uid:
         await message.answer("<blockquote>❌ ID или @username.</blockquote>"); return
     data = await state.get_data()
@@ -995,11 +1035,10 @@ async def tt_bracket_series(cb: CallbackQuery, state: FSMContext):
     await cb.answer()
 
 
-@router.message(TournamentFSM.bracket_players)
+@router.message(TournamentFSM.bracket_players, ~F.text.in_(MENU_BUTTONS))
 async def tt_bracket_player(message: Message, state: FSMContext):
     if not await _is_admin(message.from_user.id): return
-    raw = message.text.strip()
-    uid = await _resolve_uid(raw)
+    uid = await _resolve_uid(message.text.strip())
     if not uid:
         await message.answer("<blockquote>❌ ID или @username.</blockquote>"); return
     data = await state.get_data()
@@ -1017,7 +1056,7 @@ async def tt_bracket_player(message: Message, state: FSMContext):
         await _show_confirm(message, state)
 
 
-@router.message(TournamentFSM.poker_stack)
+@router.message(TournamentFSM.poker_stack, ~F.text.in_(MENU_BUTTONS))
 async def tt_stack(message: Message, state: FSMContext):
     if not await _is_admin(message.from_user.id): return
     try: s = int(message.text.strip()); assert 10 <= s <= 1_000_000
@@ -1026,7 +1065,7 @@ async def tt_stack(message: Message, state: FSMContext):
     await message.answer(f"<b>🆕 Покер</b>\n{SEP}\nВремя на ход (сек):")
 
 
-@router.message(TournamentFSM.poker_turn)
+@router.message(TournamentFSM.poker_turn, ~F.text.in_(MENU_BUTTONS))
 async def tt_turn(message: Message, state: FSMContext):
     if not await _is_admin(message.from_user.id): return
     try: t = int(message.text.strip()); assert 5 <= t <= 300
@@ -1035,7 +1074,7 @@ async def tt_turn(message: Message, state: FSMContext):
     await message.answer(f"<b>🆕 Покер</b>\n{SEP}\nРост блайндов (мин):")
 
 
-@router.message(TournamentFSM.poker_blind)
+@router.message(TournamentFSM.poker_blind, ~F.text.in_(MENU_BUTTONS))
 async def tt_blind(message: Message, state: FSMContext):
     if not await _is_admin(message.from_user.id): return
     try: b = int(message.text.strip()); assert 1 <= b <= 120
@@ -1112,7 +1151,7 @@ async def _show_confirm_from_cb(cb: CallbackQuery, state: FSMContext):
     await state.set_state(TournamentFSM.confirm)
     text = await _build_confirm_text(state)
     if not await _safe_edit(cb, text, reply_markup=confirm_kb()):
-        try: await cb.message.answer(text, reply_markup=confirm_kb())
+        try: await cb.bot.send_message(cb.from_user.id, text, reply_markup=confirm_kb())
         except Exception: pass
 
 
@@ -1262,7 +1301,7 @@ async def _show_tournament_menu(cb: CallbackQuery, tid: int):
     text += f"\n<b>🎁 Приз:</b> <i>{esc(t.prize or '—')}</i>"
     kb = manage_tournament_kb(t.id, t.status, t.game_type, t.access_type)
     if not await _safe_edit(cb, text, reply_markup=kb):
-        try: await cb.message.answer(text, reply_markup=kb)
+        try: await cb.bot.send_message(cb.from_user.id, text, reply_markup=kb)
         except Exception: pass
 
 
@@ -1283,7 +1322,7 @@ async def _show_player_tournament_menu(cb: CallbackQuery, tid: int):
             f"<b>🎁 Приз:</b> <i>{esc(t.prize or '—')}</i>")
     kb = player_tournament_kb(t.id, t.status)
     if not await _safe_edit(cb, text, reply_markup=kb):
-        try: await cb.message.answer(text, reply_markup=kb)
+        try: await cb.bot.send_message(cb.from_user.id, text, reply_markup=kb)
         except Exception: pass
 
 
@@ -1595,7 +1634,7 @@ async def cb_kick(cb: CallbackQuery, state: FSMContext):
     await cb.answer()
 
 
-@router.message(InviteFSM.user_id)
+@router.message(InviteFSM.user_id, ~F.text.in_(MENU_BUTTONS))
 async def msg_invite(message: Message, state: FSMContext):
     if not await _is_admin(message.from_user.id): return
     raw = message.text.strip(); uid = None
@@ -2127,20 +2166,36 @@ async def _periodic_cleanup():
             logging.exception("cleanup error: %s", e)
 
 
+# ============ FALLBACK (ловит всё, что не попало выше) ============
+@router.message()
+async def fallback_handler(message: Message, state: FSMContext):
+    cur = await state.get_state()
+    await state.clear()
+    if cur:
+        is_adm = await _is_admin(message.from_user.id)
+        await message.answer(
+            "🤖 <i>Предыдущий диалог сброшен.</i>\n\n🏠 <b>Главное меню</b>",
+            reply_markup=reply_main_menu(message.from_user.id, is_adm))
+    else:
+        await message.answer(
+            "🤖 <i>Я не понял команду. Используй кнопки внизу.</i>\n\n"
+            "<blockquote>Команды: /start /menu /help</blockquote>")
+
+
+# ============ MAIN ============
 async def main():
     if not BOT_TOKEN: raise SystemExit("❌ BOT_TOKEN не задан")
     await init_db()
     bot = Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
     dp = Dispatcher(); dp.include_router(router)
 
-    # Глобальный error-handler: не даёт боту падать на необработанных ошибках хендлеров
     @dp.errors()
     async def on_error(event: ErrorEvent):
         e = event.exception
         if isinstance(e, TelegramBadRequest):
             s = str(e)
-            if "query is too old" in s or "query ID is invalid" in s:
-                logging.debug("Suppressed stale callback: %s", s)
+            if ("query is too old" in s or "query ID is invalid" in s
+                or "message is not modified" in s):
                 return True
         logging.exception("Handler error: %s", e)
         return True
