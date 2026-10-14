@@ -35,8 +35,9 @@ logging.basicConfig(level=logging.INFO)
 router = Router()
 _finalized_tids = set()
 _bg_tasks: set[asyncio.Task] = set()
-VALID_BRACKET_SIZES = [4, 8, 16]
+VALID_BRACKET_SIZES = [4, 8, 16, 32]
 VALID_SERIES_TARGETS = [1, 2, 3]
+MAX_ACTIVE_TOURNAMENTS_PER_ADMIN = 5
 
 
 def _spawn(coro):
@@ -59,6 +60,14 @@ async def _is_admin(user_id):
 async def _check_ban(user_id):
     async with SessionLocal() as s:
         return await s.get(Ban, user_id) is not None
+
+
+async def _active_tournaments_count(user_id):
+    async with SessionLocal() as s:
+        r = await s.execute(select(func.count()).select_from(Tournament).where(
+            Tournament.creator_id == user_id,
+            Tournament.status.in_(("registration", "running", "paused"))))
+        return r.scalar() or 0
 
 
 async def _upsert_user(fu):
@@ -259,7 +268,7 @@ def _help_text():
             "<b>🎡 Колесо Фортуны:</b>\n▫️ Крутит админ.\n\n"
             "<b>⚔️ Колесо 1×1:</b>\n▫️ Два игрока по нику.\n\n"
             "<b>🏆 Турнир с сеткой:</b>\n"
-            "▫️ 4/8/16 игроков в плей-офф.\n"
+            "▫️ 4/8/16/32 игрока в плей-офф.\n"
             "▫️ Серия побед настраивается (1/2/3).\n"
             "▫️ Победитель матча проходит дальше.\n\n"
             "<blockquote>🎯 Кнопки внизу.</blockquote>")
@@ -341,8 +350,19 @@ async def txt_profile(message: Message):
 async def txt_create(message: Message, state: FSMContext):
     if not await _is_admin(message.from_user.id):
         await message.answer("⛔ Только админ — @Dimo0nchik"); return
+    # Проверка лимита активных турниров
+    active_count = await _active_tournaments_count(message.from_user.id)
+    if active_count >= MAX_ACTIVE_TOURNAMENTS_PER_ADMIN:
+        await message.answer(
+            f"<blockquote>⛔ У тебя уже <b>{active_count}</b> активных турниров "
+            f"(максимум {MAX_ACTIVE_TOURNAMENTS_PER_ADMIN}).<br><br>"
+            "Заверши или удали один, прежде чем создавать новый.</blockquote>")
+        return
     await state.clear(); await state.set_state(TournamentFSM.access_type)
-    await message.answer(f"<b>🆕 Шаг 1</b>\n{SEP}\nДоступ:", reply_markup=access_type_kb())
+    await message.answer(
+        f"<b>🆕 Шаг 1</b>\n{SEP}\nДоступ:\n"
+        f"<i>(Активных турниров: {active_count}/{MAX_ACTIVE_TOURNAMENTS_PER_ADMIN})</i>",
+        reply_markup=access_type_kb())
 
 
 @router.message(StateFilter(None), F.text == "👑 Админство")
@@ -499,6 +519,7 @@ async def txt_created(message: Message):
         lines.append(f"{emoji} <b>{esc(t.name)}</b> · <code>{t.status}</code>")
         rows.append([InlineKeyboardButton(text=f"⚙️ {t.name[:22]}",
                                           callback_data=f"tt_manage_{t.id}")])
+    lines.append(f"\n<i>Активных: {len(tours)}/{MAX_ACTIVE_TOURNAMENTS_PER_ADMIN}</i>")
     await message.answer("\n".join(lines), reply_markup=InlineKeyboardMarkup(inline_keyboard=rows))
 
 
@@ -831,7 +852,6 @@ async def tt_bracket_series(cb: CallbackQuery, state: FSMContext):
     await state.update_data(bracket_series=n)
     data = await state.get_data()
     if data.get("access_type") == "open":
-        # Открытый — не спрашиваем игроков, они сами зайдут
         await state.set_state(TournamentFSM.confirm)
         await _show_confirm_from_cb(cb, state)
     else:
@@ -964,6 +984,19 @@ async def _show_confirm_from_cb(cb: CallbackQuery, state: FSMContext):
 
 @router.callback_query(F.data == "tt_confirm")
 async def tt_confirm(cb: CallbackQuery, state: FSMContext):
+    # Повторная проверка лимита (на случай гонки)
+    active_count = await _active_tournaments_count(cb.from_user.id)
+    if active_count >= MAX_ACTIVE_TOURNAMENTS_PER_ADMIN:
+        await state.clear()
+        await cb.answer("Лимит активных турниров достигнут", show_alert=True)
+        try:
+            await cb.message.edit_text(
+                f"<blockquote>⛔ У тебя уже <b>{active_count}</b> активных турниров. "
+                f"Максимум — {MAX_ACTIVE_TOURNAMENTS_PER_ADMIN}.<br><br>"
+                "Заверши или удали один, прежде чем создавать новый.</blockquote>")
+        except: pass
+        return
+
     data = await state.get_data()
     gt = data["game_type"]
 
