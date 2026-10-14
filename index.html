@@ -15,6 +15,7 @@ html,body{margin:0;padding:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe
 .status.ok{background:#16a34a;}
 .status.err{background:#dc2626;}
 .btn-leave{background:#b91c1c;color:#fff;border:none;padding:6px 10px;border-radius:8px;font-size:11px;font-weight:700;cursor:pointer;}
+.btn-room-exit{background:linear-gradient(135deg,#db2777,#a855f7);color:#fff;border:none;padding:6px 12px;border-radius:8px;font-size:11px;font-weight:800;cursor:pointer;letter-spacing:.5px;box-shadow:0 2px 8px rgba(219,39,119,.5);}
 .btn-admin{background:#ea580c;color:#fff;border:none;padding:6px 10px;border-radius:8px;font-size:11px;font-weight:700;cursor:pointer;margin-right:3px;}
 .view{flex:1;display:flex;flex-direction:column;}
 .hidden{display:none!important;}
@@ -42,23 +43,26 @@ html,body{margin:0;padding:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe
 .tr-card .btn-start{padding:14px;border-radius:12px;border:none;background:linear-gradient(135deg,#16a34a,#22c55e);color:#fff;font-weight:900;font-size:15px;cursor:pointer;letter-spacing:1px;box-shadow:0 4px 12px rgba(34,197,94,.4);}
 .tr-card .btn-start:disabled{background:#475569;box-shadow:none;}
 .empty{padding:40px 20px;text-align:center;color:#94a3b8;}
-.room-head{padding:16px 14px 8px;text-align:center;}
-.room-title{font-family:Georgia,serif;font-size:26px;font-weight:900;letter-spacing:3px;background:linear-gradient(135deg,#fbbf24,#f59e0b,#fbbf24);-webkit-background-clip:text;background-clip:text;color:transparent;margin-bottom:10px;text-shadow:0 0 30px rgba(251,191,36,.5);}
-.room-prize{display:inline-block;padding:10px 24px;border:3px solid #fbbf24;border-radius:14px;background:linear-gradient(135deg,rgba(251,191,36,.15),rgba(245,158,11,.05));color:#fbbf24;font-weight:900;font-size:15px;box-shadow:0 0 20px rgba(251,191,36,.4),inset 0 0 20px rgba(251,191,36,.1);}
+.room-head{padding:14px 14px 6px;text-align:center;}
+.room-title{font-family:Georgia,serif;font-size:24px;font-weight:900;letter-spacing:2px;background:linear-gradient(135deg,#fbbf24,#f59e0b,#fbbf24);-webkit-background-clip:text;background-clip:text;color:transparent;margin-bottom:8px;text-shadow:0 0 30px rgba(251,191,36,.5);}
+.room-prize{display:inline-block;padding:8px 20px;border:3px solid #fbbf24;border-radius:14px;background:linear-gradient(135deg,rgba(251,191,36,.15),rgba(245,158,11,.05));color:#fbbf24;font-weight:900;font-size:14px;box-shadow:0 0 20px rgba(251,191,36,.4),inset 0 0 20px rgba(251,191,36,.1);}
+.rm-scoreline{margin:10px auto 0;display:flex;justify-content:center;align-items:center;gap:14px;padding:8px 18px;background:linear-gradient(135deg,rgba(30,41,59,.9),rgba(15,23,42,.9));border:2px solid rgba(251,191,36,.4);border-radius:14px;max-width:520px;font-size:13px;font-weight:800;}
+.rm-scoreline .sl-name{color:#e2e8f0;max-width:110px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.rm-scoreline .sl-score{font-size:22px;color:#fbbf24;font-weight:900;text-shadow:0 0 10px rgba(251,191,36,.6);}
+.rm-scoreline .sl-sep{color:#64748b;font-size:16px;}
+.rm-scoreline .sl-target{color:#94a3b8;font-size:11px;font-weight:600;}
 .counter-badge{display:inline-block;padding:6px 14px;background:#334155;border-radius:999px;font-size:13px;margin-top:8px;color:#cbd5e1;font-weight:700;}
 .wheel-stage{position:relative;display:flex;justify-content:center;align-items:center;padding:32px 14px 14px;perspective:1000px;}
 .wheel-stage::before{content:'';position:absolute;inset:0;background:radial-gradient(circle at 50% 45%,rgba(219,39,119,.25) 0%,transparent 60%),radial-gradient(circle at 50% 45%,rgba(124,58,237,.2) 0%,transparent 70%);pointer-events:none;animation:wheelPulse 3s ease-in-out infinite;}
 @keyframes wheelPulse{0%,100%{opacity:.7;transform:scale(1);}50%{opacity:1;transform:scale(1.03);}}
-#wheel{position:relative;z-index:2;width:90vw;max-width:480px;filter:drop-shadow(0 0 30px rgba(219,39,119,.6)) drop-shadow(0 0 60px rgba(124,58,237,.4));animation:wheelGlow 4s ease-in-out infinite;}
-@keyframes wheelGlow{0%,100%{filter:drop-shadow(0 0 30px rgba(219,39,119,.6)) drop-shadow(0 0 60px rgba(124,58,237,.4));}50%{filter:drop-shadow(0 0 40px rgba(219,39,119,.9)) drop-shadow(0 0 80px rgba(124,58,237,.7));}}
-.pointer{position:absolute;top:12px;left:50%;transform:translateX(-50%);font-size:0;z-index:5;filter:drop-shadow(0 0 12px #fbbf24) drop-shadow(0 0 24px rgba(251,191,36,.7));animation:pointerBob 1.2s ease-in-out infinite;}
+#wheel{position:relative;z-index:2;width:90vw;max-width:480px;filter:drop-shadow(0 0 30px rgba(219,39,119,.6)) drop-shadow(0 0 60px rgba(124,58,237,.4));}
+.pointer{position:absolute;top:12px;left:50%;transform:translateX(-50%);font-size:0;z-index:5;filter:drop-shadow(0 0 12px #fbbf24) drop-shadow(0 0 24px rgba(251,191,36,.7));animation:pointerBob 1.2s ease-in-out infinite;will-change:transform;}
 .pointer::before{content:'';display:block;width:0;height:0;border-left:22px solid transparent;border-right:22px solid transparent;border-top:36px solid #fbbf24;filter:drop-shadow(0 3px 8px rgba(0,0,0,.9));}
 .pointer::after{content:'';position:absolute;top:-6px;left:50%;transform:translateX(-50%);width:14px;height:14px;border-radius:50%;background:radial-gradient(circle,#fff 0%,#fbbf24 60%,#f59e0b 100%);box-shadow:0 0 14px #fbbf24,0 0 28px #f59e0b;}
 @keyframes pointerBob{0%,100%{transform:translateX(-50%) translateY(0);}50%{transform:translateX(-50%) translateY(3px);}}
 .spin-big{display:flex;justify-content:center;padding:8px 16px 16px;}
 .spin-big button{position:relative;padding:18px 44px;border-radius:999px;border:2px solid rgba(255,255,255,.3);background:linear-gradient(135deg,#db2777,#a855f7,#f59e0b);background-size:200% 200%;color:#fff;font-weight:900;font-size:18px;letter-spacing:2px;cursor:pointer;box-shadow:0 0 24px rgba(219,39,119,.7),0 0 48px rgba(168,85,247,.5),0 8px 24px rgba(0,0,0,.5);animation:spinBtnShift 3s ease infinite;transition:transform .15s,box-shadow .3s;}
-.spin-big button:hover:not(:disabled){transform:translateY(-2px);box-shadow:0 0 32px rgba(219,39,119,.9),0 0 64px rgba(168,85,247,.7),0 12px 28px rgba(0,0,0,.6);}
-.spin-big button:active:not(:disabled){transform:translateY(0) scale(.97);}
+.spin-big button:hover:not(:disabled){transform:translateY(-2px);}
 .spin-big button:disabled{background:#334155;border-color:#475569;box-shadow:none;animation:none;color:#94a3b8;}
 @keyframes spinBtnShift{0%,100%{background-position:0% 50%;}50%{background-position:100% 50%;}}
 .participants{margin:0 14px 20px;background:linear-gradient(135deg,#0f172a,#1e293b);border-radius:14px;padding:14px;border:1px solid rgba(124,58,237,.4);box-shadow:0 0 20px rgba(124,58,237,.2),inset 0 0 20px rgba(124,58,237,.05);}
@@ -71,21 +75,20 @@ html,body{margin:0;padding:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe
 .p-row.elim{color:#fca5a5;opacity:.6;border-left-color:#dc2626;text-decoration:line-through;}
 .p-row.win{color:#fef3c7;font-weight:800;border-left-color:#fbbf24;background:linear-gradient(90deg,rgba(251,191,36,.2),rgba(15,23,42,.7));box-shadow:0 0 12px rgba(251,191,36,.4);}
 .p-row.ready{border-left-color:#22c55e;background:linear-gradient(90deg,rgba(34,197,94,.15),rgba(15,23,42,.7));}
-.p-row .ready-mark{color:#22c55e;font-weight:900;margin-left:6px;text-shadow:0 0 6px rgba(34,197,94,.6);}
+.p-row .ready-mark{color:#22c55e;font-weight:900;margin-left:6px;}
 .duel-wrap{padding:14px;display:flex;flex-direction:column;gap:14px;}
 .duel-vs{display:flex;align-items:center;justify-content:space-around;background:linear-gradient(135deg,#1e293b,#0f172a);border:2px solid rgba(168,85,247,.5);border-radius:20px;padding:20px 14px;box-shadow:0 0 30px rgba(168,85,247,.3),inset 0 0 20px rgba(168,85,247,.1);}
 .duel-side{flex:1;text-align:center;padding:8px;}
-.duel-side .ava{font-size:44px;margin-bottom:6px;filter:drop-shadow(0 0 12px rgba(255,255,255,.3));}
+.duel-side .ava{font-size:44px;margin-bottom:6px;}
 .duel-side .nm{font-weight:800;font-size:15px;color:#fef3c7;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-bottom:6px;}
 .duel-side .score-big{font-size:26px;font-weight:900;color:#fbbf24;text-shadow:0 0 16px rgba(251,191,36,.6);margin:2px 0 4px;}
 .duel-side .status-tag{display:inline-block;padding:4px 10px;border-radius:999px;font-size:11px;font-weight:800;}
 .duel-side .status-tag.notready{background:#7f1d1d;color:#fecaca;}
 .duel-side .status-tag.ready{background:#065f46;color:#d1fae5;box-shadow:0 0 12px rgba(34,197,94,.6);}
-.duel-vs-mid{font-size:28px;font-weight:900;background:linear-gradient(135deg,#fbbf24,#db2777);-webkit-background-clip:text;background-clip:text;color:transparent;padding:0 10px;text-shadow:0 0 30px rgba(251,191,36,.5);animation:vsPulse 2s infinite;}
-@keyframes vsPulse{0%,100%{transform:scale(1);}50%{transform:scale(1.1);}}
+.duel-vs-mid{font-size:28px;font-weight:900;background:linear-gradient(135deg,#fbbf24,#db2777);-webkit-background-clip:text;background-clip:text;color:transparent;padding:0 10px;}
 .ready-btn{display:flex;justify-content:center;padding:4px 16px 16px;}
-.ready-btn button{padding:16px 38px;border-radius:999px;border:2px solid rgba(255,255,255,.3);background:linear-gradient(135deg,#16a34a,#22c55e);color:#fff;font-weight:900;font-size:16px;letter-spacing:1.5px;cursor:pointer;box-shadow:0 0 24px rgba(34,197,94,.6),0 8px 24px rgba(0,0,0,.5);transition:transform .15s,box-shadow .3s;}
-.ready-btn button:hover:not(:disabled){transform:translateY(-2px);box-shadow:0 0 32px rgba(34,197,94,.9);}
+.ready-btn button{padding:16px 38px;border-radius:999px;border:2px solid rgba(255,255,255,.3);background:linear-gradient(135deg,#16a34a,#22c55e);color:#fff;font-weight:900;font-size:16px;letter-spacing:1.5px;cursor:pointer;box-shadow:0 0 24px rgba(34,197,94,.6),0 8px 24px rgba(0,0,0,.5);transition:transform .15s;}
+.ready-btn button:hover:not(:disabled){transform:translateY(-2px);}
 .ready-btn button:disabled{background:#334155;box-shadow:none;color:#94a3b8;}
 .ready-btn button.pressed{background:linear-gradient(135deg,#065f46,#065f46);cursor:default;}
 .waiting-info{text-align:center;color:#94a3b8;font-size:14px;padding:10px;}
@@ -102,16 +105,16 @@ html,body{margin:0;padding:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe
 .player.turn{border-color:#facc15;box-shadow:0 0 24px #facc15,0 0 12px #f59e0b;}
 .player.folded{opacity:.35;filter:grayscale(1);}
 .player .name{font-weight:800;font-size:12px;color:#fef3c7;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
-.player .chips{color:#fbbf24;font-weight:800;font-size:13px;text-shadow:0 0 6px rgba(251,191,36,.5);}
+.player .chips{color:#fbbf24;font-weight:800;font-size:13px;}
 .player .bet{color:#22d3ee;font-size:11px;font-weight:700;}
 .player .cards{display:flex;gap:2px;justify-content:center;margin-top:3px;}
 .player .cards .mini{width:18px;height:26px;border-radius:3px;background:#fff;color:#111;font-size:10px;display:flex;align-items:center;justify-content:center;font-weight:800;}
 .player .cards .mini.red{color:#dc2626;}
 .player .cards .mini.back{background:#1e40af;color:transparent;}
 .log-box{margin:6px 10px;padding:8px 12px;background:#0f172a;border:1px solid #334155;border-radius:10px;font-size:11px;color:#94a3b8;max-height:60px;overflow-y:auto;white-space:pre-line;}
-.actions-frame{margin:8px 12px;padding:12px;border:3px solid #a78bfa;border-radius:18px;background:linear-gradient(135deg,rgba(124,58,237,.15),rgba(30,64,175,.15));box-shadow:0 0 24px rgba(167,139,250,.3),inset 0 0 24px rgba(167,139,250,.05);}
+.actions-frame{margin:8px 12px;padding:12px;border:3px solid #a78bfa;border-radius:18px;background:linear-gradient(135deg,rgba(124,58,237,.15),rgba(30,64,175,.15));}
 .actions{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;}
-.btn{border:none;border-radius:12px;padding:14px 10px;color:#fff;font-weight:800;font-size:14px;cursor:pointer;transition:transform .1s,opacity .15s;background:#334155;box-shadow:0 3px 8px rgba(0,0,0,.3);}
+.btn{border:none;border-radius:12px;padding:14px 10px;color:#fff;font-weight:800;font-size:14px;cursor:pointer;transition:transform .1s;background:#334155;box-shadow:0 3px 8px rgba(0,0,0,.3);}
 .btn:active{transform:scale(.95);}
 .btn:disabled{opacity:.35;}
 .btn-fold{background:linear-gradient(135deg,#991b1b,#dc2626);}
@@ -138,7 +141,7 @@ html,body{margin:0;padding:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe
 .kick-list{display:flex;flex-direction:column;gap:8px;margin-top:10px;max-height:50vh;overflow-y:auto;}
 .kick-row{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px 12px;background:rgba(15,23,42,.85);border-radius:10px;border-left:3px solid #a78bfa;font-size:14px;}
 .kick-row .kick-name{flex:1;text-align:left;font-weight:700;color:#fef3c7;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
-.kick-row .kick-x{flex-shrink:0;background:linear-gradient(135deg,#991b1b,#dc2626);color:#fff;border:none;border-radius:8px;padding:6px 12px;font-size:15px;font-weight:900;cursor:pointer;box-shadow:0 0 12px rgba(220,38,38,.5);}
+.kick-row .kick-x{flex-shrink:0;background:linear-gradient(135deg,#991b1b,#dc2626);color:#fff;border:none;border-radius:8px;padding:6px 12px;font-size:15px;font-weight:900;cursor:pointer;}
 .confetti{position:fixed;inset:0;pointer-events:none;z-index:99;}
 .countdown-text{color:#fbbf24;font-size:14px;font-weight:800;margin-top:8px;}
 
@@ -159,7 +162,6 @@ html,body{margin:0;padding:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe
 .bracket-check{flex-shrink:0;width:26px;height:26px;border-radius:6px;border:2px solid #475569;background:#1e293b;color:#64748b;cursor:pointer;display:flex;align-items:center;justify-content:center;font-weight:900;font-size:14px;transition:all .2s;}
 .bracket-check:disabled{cursor:default;opacity:.7;}
 .bracket-check.checked{background:linear-gradient(135deg,#16a34a,#22c55e);border-color:#22c55e;color:#fff;box-shadow:0 0 12px rgba(34,197,94,.7);}
-.bracket-check.opponent.checked{background:linear-gradient(135deg,#166534,#15803d);border-color:#15803d;color:#fff;}
 .bracket-check.notmine{cursor:default;}
 .bracket-enter-btn{margin-top:4px;padding:8px;border-radius:8px;border:none;background:linear-gradient(135deg,#db2777,#a855f7);color:#fff;font-weight:800;font-size:12px;cursor:pointer;letter-spacing:1px;}
 .bracket-enter-btn:disabled{background:#334155;color:#64748b;cursor:not-allowed;box-shadow:none;}
@@ -167,7 +169,6 @@ html,body{margin:0;padding:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe
 .bracket-enter-btn.spectate{background:linear-gradient(135deg,#334155,#475569);}
 .bracket-enter-btn.spectate:hover:not(:disabled){background:linear-gradient(135deg,#475569,#64748b);}
 .bracket-vs{text-align:center;font-size:10px;color:#64748b;font-weight:800;letter-spacing:1px;margin:-2px 0;}
-.bracket-round-tag{font-size:10px;color:#94a3b8;text-align:center;margin-bottom:2px;}
 </style>
 </head>
 <body>
@@ -178,6 +179,7 @@ html,body{margin:0;padding:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe
       <button id="ad-kick" class="btn-admin">🚫 Кик</button>
       <button id="ad-end" class="btn-admin">🏁 Закончить</button>
     </div>
+    <button id="room-exit-btn" class="btn-room-exit hidden">🚪 Покинуть комнату</button>
     <button id="leave-btn" class="btn-leave hidden">🚪 Выйти</button>
     <div id="status" class="status">Подключение…</div>
   </header>
@@ -212,6 +214,7 @@ html,body{margin:0;padding:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe
     <div class="room-head">
       <div class="room-title" id="rm-title">—</div>
       <div class="room-prize" id="rm-prize">🏆 Приз</div>
+      <div id="rm-scoreline" class="rm-scoreline hidden"></div>
       <div class="counter-badge" id="rm-counter">👥 Игроков: 0</div>
     </div>
     <div id="room-content"></div>
@@ -242,7 +245,9 @@ const els = {
   pfRole: document.getElementById("pf-role"), pfWins: document.getElementById("pf-wins"),
   rmTitle: document.getElementById("rm-title"), rmPrize: document.getElementById("rm-prize"),
   rmCounter: document.getElementById("rm-counter"),
+  rmScoreline: document.getElementById("rm-scoreline"),
   leaveBtn: document.getElementById("leave-btn"),
+  roomExitBtn: document.getElementById("room-exit-btn"),
   adminToolbar: document.getElementById("admin-toolbar"),
   adKick: document.getElementById("ad-kick"),
   adEnd: document.getElementById("ad-end"),
@@ -269,6 +274,8 @@ let BRACKET_MATCH_VIEW_STATE = {};
 let BRACKET_MATCH_VIEW_TIMER = {};
 let BRACKET_MATCH_VIEW_ANIM = {};
 let BRACKET_MATCH_LAST_SPIN_SHOWN = {};
+let BRACKET_WHEEL_CACHE = null;   // offscreen canvas для секторов
+let BRACKET_WHEEL_CACHE_KEY = ""; // ключ кеша (match_id + имена + WHEEL_SIZE)
 
 function show(el){el.classList.remove("hidden");}
 function hide(el){el.classList.add("hidden");}
@@ -278,6 +285,45 @@ function stopAutoSpin(){ AUTO_SPIN = false; if(AUTO_TIMER){ clearTimeout(AUTO_TI
 function clearExitTimer(){ if(EXIT_TIMER){ clearTimeout(EXIT_TIMER); EXIT_TIMER = null; } }
 function syncServerTime(s){ if(s && s.server_now){ SERVER_OFFSET = s.server_now - Date.now(); } }
 function nowServer(){ return Date.now() + SERVER_OFFSET; }
+
+/* ============================================================
+   10 паттернов спина — разная динамика, разные кривые,
+   разное количество оборотов и направление. Все укладываются
+   в одно и то же серверное окно (BRACKET_SPIN_DURATION_MS).
+   ============================================================ */
+const SPIN_PATTERNS = [
+  {turns: 8,  dir:  1, easing: k => 1 - Math.pow(1 - k, 4)},
+  {turns: 12, dir:  1, easing: k => 1 - Math.pow(1 - k, 6)},
+  {turns: 10, dir: -1, easing: k => 1 - Math.pow(1 - k, 5)},
+  {turns: 9,  dir:  1, easing: k => {
+      if(k < 0.1) return (k / 0.1) * 0.06;
+      return 0.06 + 0.94 * (1 - Math.pow(1 - (k - 0.1) / 0.9, 4));
+  }},
+  {turns: 11, dir:  1, easing: k => 0.5 * (1 - Math.cos(Math.PI * k))},
+  {turns: 14, dir: -1, easing: k => 1 - Math.pow(1 - k, 3)},
+  {turns: 7,  dir:  1, easing: k => k * k * (3 - 2 * k)},
+  {turns: 13, dir:  1, easing: k => 1 - Math.pow(1 - k, 7)},
+  {turns: 10, dir: -1, easing: k => {
+      if(k < 0.85) return 0.88 * (1 - Math.pow(1 - k / 0.85, 3));
+      const t = (k - 0.85) / 0.15;
+      return 0.88 + 0.12 * (1 - Math.pow(1 - t, 2));
+  }},
+  {turns: 9,  dir:  1, easing: k => {
+      const s = Math.sin((k * Math.PI) / 2);
+      return s * s * s;
+  }},
+];
+
+// Выбор паттерна, не повторяющий предыдущий
+let _lastPatternIdx = -1;
+function pickSpinPattern(){
+  if(SPIN_PATTERNS.length === 1) return SPIN_PATTERNS[0];
+  let idx;
+  do { idx = Math.floor(Math.random() * SPIN_PATTERNS.length); }
+  while (idx === _lastPatternIdx);
+  _lastPatternIdx = idx;
+  return SPIN_PATTERNS[idx];
+}
 
 document.querySelectorAll("#tabs .tab").forEach(t => {
   t.addEventListener("click", () => {
@@ -297,6 +343,7 @@ document.querySelectorAll(".room-tab").forEach(t => {
     t.classList.add("active");
     if(ACTIVE_ROOM_TAB === "bracket"){
       hide(els.roomContent); show(els.bracketContent);
+      els.rmScoreline.classList.add("hidden");
       if(LAST_STATE && LAST_STATE.type === "bracket_state") drawBracketUI(LAST_STATE);
     } else {
       hide(els.bracketContent); show(els.roomContent);
@@ -405,12 +452,15 @@ async function openRoom(tid){
     BRACKET_ACTIVE_MATCH_ID = null; BRACKET_MY_MATCH_ID = null;
     BRACKET_MATCH_VIEW_STATE = {}; BRACKET_MATCH_VIEW_TIMER = {};
     BRACKET_MATCH_VIEW_ANIM = {}; BRACKET_MATCH_LAST_SPIN_SHOWN = {};
+    BRACKET_WHEEL_CACHE = null; BRACKET_WHEEL_CACHE_KEY = "";
     ACTIVE_ROOM_TAB = (info.game_type === "bracket") ? "bracket" : "main";
     hide(els.tabs); hide(els.profileView); hide(els.tournamentsView);
     show(els.roomView);
     els.title.textContent = `🏆 ${info.name}`;
     els.rmTitle.textContent = info.name;
     els.rmPrize.textContent = "🏆 " + (info.prize || "Приз");
+    els.rmScoreline.classList.add("hidden");
+    els.roomExitBtn.classList.add("hidden");
     show(els.leaveBtn);
     if(IS_ADMIN) show(els.adminToolbar);
     else hide(els.adminToolbar);
@@ -433,13 +483,14 @@ function exitRoom(){
   for(const mid in BRACKET_MATCH_VIEW_ANIM){ try{ cancelAnimationFrame(BRACKET_MATCH_VIEW_ANIM[mid]); }catch(e){} }
   BRACKET_MATCH_VIEW_TIMER = {}; BRACKET_MATCH_VIEW_ANIM = {}; BRACKET_MATCH_VIEW_STATE = {};
   BRACKET_MATCH_LAST_SPIN_SHOWN = {};
+  BRACKET_WHEEL_CACHE = null; BRACKET_WHEEL_CACHE_KEY = "";
   PENDING_ENDED = null; WHEEL_NEXT = null; WHEEL_LOCK = false;
   MY_READY = false; BRACKET_ACTIVE_MATCH_ID = null; BRACKET_MY_MATCH_ID = null;
   ACTIVE_ROOM_TAB = "bracket";
   if(WS) try{WS.close();}catch(e){}
   WS = null; ACTIVE_TID = null; GAME_TYPE = null; LAST_STATE = null;
-  hide(els.roomView); hide(els.leaveBtn); hide(els.adminToolbar); hide(els.roomTabs);
-  hide(els.modal); hide(els.confetti);
+  hide(els.roomView); hide(els.leaveBtn); hide(els.roomExitBtn); hide(els.adminToolbar); hide(els.roomTabs);
+  hide(els.modal); hide(els.confetti); els.rmScoreline.classList.add("hidden");
   show(els.tabs);
   document.querySelectorAll("#tabs .tab").forEach(x => x.classList.remove("active"));
   document.querySelector('#tabs .tab[data-tab="tournaments"]').classList.add("active");
@@ -538,13 +589,16 @@ function _showEndedModal(msg){
   EXIT_TIMER = setTimeout(()=>{ clearInterval(tick); exitRoom(); }, countdown * 1000 + 200);
 }
 
+// Кнопка "Покинуть комнату" в topbar
+els.roomExitBtn.addEventListener("click", () => {
+  closeBracketRoom();
+});
+
 // ================== BRACKET ==================
 function renderBracket(s){
   LAST_STATE = s;
   if(BRACKET_ACTIVE_MATCH_ID){
-    // пользователь в конкретной комнате
     if(ACTIVE_ROOM_TAB === "bracket"){
-      // он на вкладке "Сетка", но всё ещё "в комнате" — покажем сетку, а если вернётся на "Комната", вернёмся в комнату
       drawBracketUI(s);
     } else {
       renderBracketRoom(s, BRACKET_ACTIVE_MATCH_ID);
@@ -580,9 +634,29 @@ function getRoundNames(total){
   return Array.from({length: total}, (_, i) => `Раунд ${i + 1}`);
 }
 
+/* ============ Scoreline для наблюдателей ============ */
+function updateScoreline(m){
+  if(!m){ els.rmScoreline.classList.add("hidden"); return; }
+  const p1Name = m.p1?.name || "—";
+  const p2Name = m.p2?.name || "—";
+  const p1w = m.p1_wins || 0, p2w = m.p2_wins || 0;
+  const target = m.series_target || 3;
+  els.rmScoreline.innerHTML = `
+    <span class="sl-name">${escapeHtml(p1Name)}</span>
+    <span class="sl-score">${p1w}</span>
+    <span class="sl-sep">:</span>
+    <span class="sl-score">${p2w}</span>
+    <span class="sl-name">${escapeHtml(p2Name)}</span>
+    <span class="sl-target">до ${target}</span>
+  `;
+  els.rmScoreline.classList.remove("hidden");
+}
+
 /* ============ СПИСОК АКТИВНЫХ КОМНАТ ============ */
 function drawBracketRoomsList(s){
   els.rmCounter.textContent = `🎮 Комнаты · ${s.size} игроков`;
+  els.rmScoreline.classList.add("hidden");
+  els.roomExitBtn.classList.add("hidden");
   if(s.waiting || !s.rounds || !s.rounds.length){
     els.roomContent.innerHTML = `<div class="waiting-box">
       <div class="waiting-ico">🎮</div>
@@ -665,13 +739,11 @@ function openBracketRoom(mid){
   BRACKET_ACTIVE_MATCH_ID = mid;
   BRACKET_MATCH_VIEW_STATE[mid] = null;
 
-  // Умный старт: если спин уже идёт — дать клиенту его догнать
   const mm = LAST_STATE ? findMatch(LAST_STATE, mid) : null;
   if(mm && mm.last_spin){
     const now = nowServer();
     const spinEndsAt = (mm.last_spin.started_at || 0) + (mm.last_spin.duration || 20000);
     if(now < spinEndsAt){
-      // спин ещё крутится → анимируем с текущего момента
       BRACKET_MATCH_LAST_SPIN_SHOWN[mid] = (mm.spin_count || 1) - 1;
     } else {
       BRACKET_MATCH_LAST_SPIN_SHOWN[mid] = mm.spin_count || 0;
@@ -682,12 +754,12 @@ function openBracketRoom(mid){
 
   wsSend({type: "bracket_enter", match_id: mid});
 
-  // Переходим на вкладку «Комната»
   ACTIVE_ROOM_TAB = "main";
   document.querySelectorAll(".room-tab").forEach(x => x.classList.remove("active"));
   const mainTab = document.querySelector('.room-tab[data-rtab="main"]');
   if(mainTab) mainTab.classList.add("active");
   hide(els.bracketContent); show(els.roomContent);
+  els.roomExitBtn.classList.remove("hidden");
   if(LAST_STATE) renderBracketRoom(LAST_STATE, mid);
 }
 
@@ -703,17 +775,22 @@ function closeBracketRoom(){
   }
   BRACKET_ACTIVE_MATCH_ID = null;
   BRACKET_MATCH_VIEW_STATE = {};
+  BRACKET_WHEEL_CACHE = null; BRACKET_WHEEL_CACHE_KEY = "";
+  els.rmScoreline.classList.add("hidden");
+  els.roomExitBtn.classList.add("hidden");
   if(LAST_STATE) drawBracketRoomsList(LAST_STATE);
 }
 
 /* ============ СЕТКА ============ */
 function drawBracketUI(s){
   els.rmCounter.textContent = `🏆 Сетка · ${s.size} игроков`;
+  els.rmScoreline.classList.add("hidden");
+  els.roomExitBtn.classList.add("hidden");
   if(s.waiting || !s.rounds || !s.rounds.length){
     els.bracketContent.innerHTML = `<div class="waiting-box">
       <div class="waiting-ico">🏆</div>
       <div class="waiting-txt">Ожидание всех участников…</div>
-      <div style="color:#94a3b8;font-size:13px;">Сетка появится, когда все примут приглашение.</div>
+      <div style="color:#94a3b8;font-size:13px;">Сетка появится, когда стартует турнир.</div>
     </div>`;
     return;
   }
@@ -830,18 +907,20 @@ function renderBracketPlayer(m, p, readyList, finished, winner, isMyMatch, wins)
 function renderBracketRoom(s, match_id){
   const m = findMatch(s, match_id);
   if(!m){
-    // матч исчез (удалён) — выходим
     BRACKET_ACTIVE_MATCH_ID = null;
     BRACKET_MATCH_VIEW_STATE[match_id] = null;
+    els.rmScoreline.classList.add("hidden");
+    els.roomExitBtn.classList.add("hidden");
     if(ACTIVE_ROOM_TAB === "bracket") drawBracketUI(s);
     else drawBracketRoomsList(s);
     return;
   }
 
+  // Счёт всегда виден (для наблюдателей особенно)
+  updateScoreline(m);
+
   const state = BRACKET_MATCH_VIEW_STATE[match_id];
-  // Идёт анимация — не мешаем
   if(state === "spinning") return;
-  // Показывается результат — таймер сам всё разрулит
   if(state === "showing_result") return;
 
   const lastShown = BRACKET_MATCH_LAST_SPIN_SHOWN[match_id] || 0;
@@ -852,7 +931,6 @@ function renderBracketRoom(s, match_id){
     BRACKET_MATCH_VIEW_STATE[match_id] = "spinning";
     clearBracketTimer(match_id);
     animateBracketSpin(s, m, () => {
-      // Дадим серверу 1 сек, чтобы он прислал финализированное состояние
       setTimeout(() => {
         if(BRACKET_ACTIVE_MATCH_ID !== match_id) return;
         showMatchResult(match_id);
@@ -861,7 +939,6 @@ function renderBracketRoom(s, match_id){
     return;
   }
 
-  // Матч уже завершён, а мы только что вошли — показать финал
   if(m.finished){
     showMatchResult(match_id);
     return;
@@ -877,10 +954,6 @@ function clearBracketTimer(match_id){
   }
 }
 
-/**
- * Показывает результат текущего спина. Читает свежий LAST_STATE,
- * потому что к этому моменту сервер уже отправил финализацию.
- */
 function showMatchResult(match_id){
   const s = LAST_STATE;
   if(!s){ return; }
@@ -888,6 +961,8 @@ function showMatchResult(match_id){
   if(!m){
     BRACKET_ACTIVE_MATCH_ID = null;
     BRACKET_MATCH_VIEW_STATE[match_id] = null;
+    els.rmScoreline.classList.add("hidden");
+    els.roomExitBtn.classList.add("hidden");
     drawBracketUI(s);
     return;
   }
@@ -896,22 +971,22 @@ function showMatchResult(match_id){
   clearBracketTimer(match_id);
 
   if(m.finished){
-    // Финал серии → 7 сек показать → перевести на вкладку «Сетка»
     drawBracketRoomFinalResult(m);
     BRACKET_MATCH_VIEW_TIMER[match_id] = setTimeout(() => {
       if(BRACKET_ACTIVE_MATCH_ID !== match_id) return;
       BRACKET_MATCH_VIEW_STATE[match_id] = null;
       BRACKET_ACTIVE_MATCH_ID = null;
-      // переключаемся на вкладку «Сетка турнира»
+      BRACKET_WHEEL_CACHE = null; BRACKET_WHEEL_CACHE_KEY = "";
       ACTIVE_ROOM_TAB = "bracket";
       document.querySelectorAll(".room-tab").forEach(x => x.classList.remove("active"));
       const bt = document.querySelector('.room-tab[data-rtab="bracket"]');
       if(bt) bt.classList.add("active");
       hide(els.roomContent); show(els.bracketContent);
+      els.rmScoreline.classList.add("hidden");
+      els.roomExitBtn.classList.add("hidden");
       if(LAST_STATE) drawBracketUI(LAST_STATE);
     }, 7000);
   } else {
-    // Промежуточная победа в серии → 3.5 сек → вернуться в комнату
     drawBracketRoomRoundResult(m);
     BRACKET_MATCH_VIEW_TIMER[match_id] = setTimeout(() => {
       if(BRACKET_ACTIVE_MATCH_ID !== match_id) return;
@@ -940,7 +1015,6 @@ function drawBracketRoomWaiting(s, m){
 
   let html = `<div class="duel-wrap">
     <div style="text-align:center;color:#94a3b8;font-size:12px;letter-spacing:1px;text-transform:uppercase;font-weight:800;">${escapeHtml(roundName)}</div>
-    <div style="text-align:center;color:#fbbf24;font-size:13px;font-weight:800;">Серия до ${target} побед · Счёт <b>${p1w}:${p2w}</b></div>
     <div class="duel-vs">
       <div class="duel-side">
         <div class="ava">${p1?.user_id === MY_ID ? '🙋' : '👤'}</div>
@@ -966,23 +1040,16 @@ function drawBracketRoomWaiting(s, m){
     html += `<div class="waiting-info">👁 Вы наблюдаете за матчем.</div>`;
   }
   html += `<div class="waiting-info">${(!p1RoomReady || !p2RoomReady) ? 'Оба игрока должны нажать «Готов» — серия начнётся автоматически.' : '🎲 Колесо крутится…'}</div>`;
-  html += `<div style="text-align:center;padding:10px;">
-    <button class="btn" id="bracket-back" style="background:#334155;">${iAmPlayer ? '⬅️ К списку комнат' : '🚪 Покинуть комнату'}</button>
-  </div>`;
   html += `</div>`;
   els.roomContent.innerHTML = html;
 
   const canvas = document.getElementById("wheel");
-  drawBracketWheelStatic(canvas, p1, p2);
+  drawBracketWheelStatic(canvas, p1, p2, m.match_id);
 
   const rr = document.getElementById("bracket-room-ready");
   if(rr) rr.addEventListener("click", () => {
     wsSend({type: "bracket_room_ready", match_id: m.match_id});
     rr.disabled = true; rr.textContent = "✅ ОТПРАВЛЕНО"; rr.classList.add("pressed");
-  });
-  const back = document.getElementById("bracket-back");
-  if(back) back.addEventListener("click", () => {
-    closeBracketRoom();
   });
 }
 
@@ -992,6 +1059,7 @@ function drawBracketRoomRoundResult(m){
   const p1w = m.p1_wins||0, p2w = m.p2_wins||0;
   const target = m.series_target || 3;
   const roundsLeft = `До победы в серии: ${Math.max(0, target - Math.max(p1w, p2w))}`;
+  updateScoreline(m);
 
   els.roomContent.innerHTML = `<div class="waiting-box">
     <div class="waiting-ico">🎯</div>
@@ -1015,6 +1083,7 @@ function drawBracketRoomFinalResult(m){
   const iLost = m.loser && m.loser.user_id === MY_ID;
   const iAmPlayer = (m.p1 && m.p1.user_id === MY_ID) || (m.p2 && m.p2.user_id === MY_ID);
   const p1w = m.p1_wins||0, p2w = m.p2_wins||0;
+  updateScoreline(m);
 
   let icon = "🏆", title = "";
   if(iWon) title = "Вы прошли дальше!";
@@ -1038,6 +1107,107 @@ function drawBracketRoomFinalResult(m){
   }, 1000);
 }
 
+/* ============================================================
+   ОПТИМИЗАЦИЯ КОЛЕСА:
+   - Offscreen canvas с секторами, текстом и обводками — рисуется 1 раз.
+   - На каждом кадре: clearRect, halo, save/rotate/drawImage, hub/эмодзи.
+   Это убирает фризы: вместо 100+ операций на кадр — 1 drawImage.
+   ============================================================ */
+function _buildBracketWheelCache(players, key, size){
+  const W = 640, H = 640;
+  const cv = document.createElement("canvas");
+  cv.width = W; cv.height = H;
+  const ctx = cv.getContext("2d");
+  const cx = W/2, cy = H/2, r = Math.min(W,H)/2 - 30;
+  const n = Math.max(players.length, 1);
+  const palette = [
+    {fill:["#ff1e56","#a41035"], glow:"#ff1e56"},
+    {fill:["#00c9ff","#005b8f"], glow:"#00c9ff"},
+  ];
+  for(let i = 0; i < n; i++){
+    const a0 = (i/n)*Math.PI*2 - Math.PI/2;
+    const a1 = ((i+1)/n)*Math.PI*2 - Math.PI/2;
+    const col = palette[i % palette.length];
+    const grad = ctx.createRadialGradient(cx, cy, r*0.2, cx, cy, r);
+    grad.addColorStop(0, col.fill[0]); grad.addColorStop(1, col.fill[1]);
+    ctx.beginPath(); ctx.moveTo(cx, cy); ctx.arc(cx, cy, r, a0, a1); ctx.closePath();
+    ctx.fillStyle = grad; ctx.fill();
+    ctx.save();
+    ctx.strokeStyle = col.glow; ctx.lineWidth = 3;
+    ctx.shadowColor = col.glow; ctx.shadowBlur = 12;
+    ctx.beginPath(); ctx.moveTo(cx, cy); ctx.lineTo(cx + r*Math.cos(a0), cy + r*Math.sin(a0));
+    ctx.stroke(); ctx.restore();
+    const mid = (a0 + a1) / 2;
+    ctx.save();
+    ctx.translate(cx, cy); ctx.rotate(mid);
+    ctx.textAlign = "right"; ctx.textBaseline = "middle";
+    ctx.shadowColor = "rgba(0,0,0,.9)"; ctx.shadowBlur = 6;
+    ctx.shadowOffsetX = 2; ctx.shadowOffsetY = 2;
+    ctx.fillStyle = "#ffffff"; ctx.font = "bold 22px 'Segoe UI',sans-serif";
+    const label = players[i] ? players[i].name : "";
+    const txt = label.length > 18 ? label.slice(0,18)+"…" : label;
+    ctx.fillText(txt, r - 18, 0);
+    ctx.restore();
+  }
+  ctx.save(); ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI*2);
+  ctx.strokeStyle = "#a78bfa"; ctx.lineWidth = 6;
+  ctx.shadowColor = "#a78bfa"; ctx.shadowBlur = 25; ctx.stroke(); ctx.restore();
+  ctx.save(); ctx.beginPath(); ctx.arc(cx, cy, r-4, 0, Math.PI*2);
+  ctx.strokeStyle = "#db2777"; ctx.lineWidth = 2;
+  ctx.shadowColor = "#db2777"; ctx.shadowBlur = 15; ctx.stroke(); ctx.restore();
+  return cv;
+}
+
+function _drawBracketWheelFrame(canvas, players, match_id){
+  if(!canvas) return;
+  const ctx = canvas.getContext("2d");
+  const W = canvas.width, H = canvas.height;
+  const cx = W/2, cy = H/2, r = Math.min(W,H)/2 - 30;
+
+  // Кеш по ключу: match_id + имена игроков
+  const key = match_id + "|" + players.map(p => (p && p.user_id) || "_").join(",");
+  if(!BRACKET_WHEEL_CACHE || BRACKET_WHEEL_CACHE_KEY !== key){
+    BRACKET_WHEEL_CACHE = _buildBracketWheelCache(players, key, W);
+    BRACKET_WHEEL_CACHE_KEY = key;
+  }
+
+  ctx.clearRect(0,0,W,H);
+
+  // Halo (статичный)
+  const haloGrad = ctx.createRadialGradient(cx, cy, r*0.6, cx, cy, r+30);
+  haloGrad.addColorStop(0, "rgba(219,39,119,0)");
+  haloGrad.addColorStop(0.7, "rgba(219,39,119,0.15)");
+  haloGrad.addColorStop(1, "rgba(219,39,119,0)");
+  ctx.fillStyle = haloGrad;
+  ctx.beginPath(); ctx.arc(cx, cy, r+30, 0, Math.PI*2); ctx.fill();
+
+  // Вращаемся вокруг центра и просто рисуем кеш
+  ctx.save();
+  ctx.translate(cx, cy);
+  ctx.rotate(WHEEL_ANGLE);
+  ctx.drawImage(BRACKET_WHEEL_CACHE, -W/2, -H/2);
+  ctx.restore();
+
+  // Hub (не вращается)
+  ctx.save();
+  ctx.beginPath(); ctx.arc(cx, cy, 58, 0, Math.PI*2);
+  const hubGrad = ctx.createRadialGradient(cx, cy, 5, cx, cy, 58);
+  hubGrad.addColorStop(0, "#1e293b"); hubGrad.addColorStop(1, "#0a0e1a");
+  ctx.fillStyle = hubGrad; ctx.shadowColor = "#7c3aed"; ctx.shadowBlur = 30; ctx.fill();
+  ctx.restore();
+  ctx.save(); ctx.beginPath(); ctx.arc(cx, cy, 58, 0, Math.PI*2);
+  ctx.strokeStyle = "#fbbf24"; ctx.lineWidth = 4;
+  ctx.shadowColor = "#fbbf24"; ctx.shadowBlur = 20; ctx.stroke(); ctx.restore();
+  ctx.save(); ctx.textAlign = "center"; ctx.textBaseline = "middle";
+  ctx.font = "36px sans-serif"; ctx.shadowColor = "#fbbf24"; ctx.shadowBlur = 20;
+  ctx.fillText("🏆", cx, cy); ctx.restore();
+}
+
+function drawBracketWheelStatic(canvas, p1, p2, match_id){
+  if(!canvas) return;
+  _drawBracketWheelFrame(canvas, [p1, p2].filter(Boolean), match_id || "static");
+}
+
 function animateBracketSpin(s, m, onDone){
   let canvas = document.getElementById("wheel");
   if(!canvas){
@@ -1055,113 +1225,51 @@ function animateBracketSpin(s, m, onDone){
   const duration = m.last_spin.duration || 20000;
   const serverStart = m.last_spin.started_at || nowServer();
 
+  // Выбираем паттерн один раз на спин
+  const pattern = pickSpinPattern();
+  const dir = pattern.dir;
+
   const span = Math.PI * 2 / n;
   const center = -(winnerIdx + 0.5) * span;
-  const target = center + offsetRatio * span + 8 * Math.PI * 2;
-  const startAngle = target - Math.PI * 2 * 12;
+  const turnsRad = pattern.turns * Math.PI * 2 * dir;
+  const target = center + offsetRatio * span + turnsRad;
+  const startAngle = target - turnsRad;
 
   const el = nowServer() - serverStart;
   const initialK = Math.min(1, Math.max(0, el / duration));
-  WHEEL_ANGLE = startAngle + (target - startAngle) * (1 - Math.pow(1 - initialK, 4));
-  drawBracketWheelDynamic(canvas, players);
+  WHEEL_ANGLE = startAngle + (target - startAngle) * pattern.easing(initialK);
+  _drawBracketWheelFrame(canvas, players, m.match_id);
 
   if(initialK >= 1){
     WHEEL_ANGLE = target;
-    drawBracketWheelDynamic(canvas, players);
+    _drawBracketWheelFrame(canvas, players, m.match_id);
     if(onDone) onDone();
     return;
   }
 
   const mid = m.match_id;
   function frame(){
-    if(BRACKET_ACTIVE_MATCH_ID !== mid){
-      // вышли из комнаты — прерываем анимацию
-      return;
-    }
+    if(BRACKET_ACTIVE_MATCH_ID !== mid) return;
     const elapsed = nowServer() - serverStart;
     const k = Math.min(1, Math.max(0, elapsed / duration));
-    const eased = 1 - Math.pow(1 - k, 4);
-    WHEEL_ANGLE = startAngle + (target - startAngle) * eased;
-    drawBracketWheelDynamic(canvas, players);
+    WHEEL_ANGLE = startAngle + (target - startAngle) * pattern.easing(k);
+    _drawBracketWheelFrame(canvas, players, m.match_id);
     if(k < 1){
       BRACKET_MATCH_VIEW_ANIM[mid] = requestAnimationFrame(frame);
     } else {
       WHEEL_ANGLE = target;
-      drawBracketWheelDynamic(canvas, players);
+      _drawBracketWheelFrame(canvas, players, m.match_id);
       if(onDone) onDone();
     }
   }
   BRACKET_MATCH_VIEW_ANIM[mid] = requestAnimationFrame(frame);
 }
 
-function drawBracketWheelStatic(canvas, p1, p2){
-  if(!canvas) return;
-  drawBracketWheelDynamic(canvas, [p1, p2].filter(Boolean));
-}
-function drawBracketWheelDynamic(canvas, players){
-  if(!canvas) return;
-  const ctx = canvas.getContext("2d");
-  const W = canvas.width, H = canvas.height;
-  const cx = W/2, cy = H/2, r = Math.min(W,H)/2 - 30;
-  ctx.clearRect(0,0,W,H);
-  const haloGrad = ctx.createRadialGradient(cx, cy, r*0.6, cx, cy, r+30);
-  haloGrad.addColorStop(0, "rgba(219,39,119,0)");
-  haloGrad.addColorStop(0.7, "rgba(219,39,119,0.15)");
-  haloGrad.addColorStop(1, "rgba(219,39,119,0)");
-  ctx.fillStyle = haloGrad;
-  ctx.beginPath(); ctx.arc(cx, cy, r+30, 0, Math.PI*2); ctx.fill();
-  const n = Math.max(players.length, 1);
-  const palette = [
-    {fill:["#ff1e56","#a41035"], glow:"#ff1e56"},
-    {fill:["#00c9ff","#005b8f"], glow:"#00c9ff"},
-  ];
-  for(let i = 0; i < n; i++){
-    const a0 = (i/n)*Math.PI*2 - Math.PI/2 + WHEEL_ANGLE;
-    const a1 = ((i+1)/n)*Math.PI*2 - Math.PI/2 + WHEEL_ANGLE;
-    const col = palette[i % palette.length];
-    const grad = ctx.createRadialGradient(cx, cy, r*0.2, cx, cy, r);
-    grad.addColorStop(0, col.fill[0]); grad.addColorStop(1, col.fill[1]);
-    ctx.beginPath(); ctx.moveTo(cx, cy); ctx.arc(cx, cy, r, a0, a1); ctx.closePath();
-    ctx.fillStyle = grad; ctx.fill();
-    ctx.save();
-    ctx.strokeStyle = col.glow; ctx.lineWidth = 3;
-    ctx.shadowColor = col.glow; ctx.shadowBlur = 12;
-    ctx.beginPath(); ctx.moveTo(cx, cy); ctx.lineTo(cx + r*Math.cos(a0), cy + r*Math.sin(a0));
-    ctx.stroke(); ctx.restore();
-    const mid2 = (a0 + a1) / 2;
-    ctx.save();
-    ctx.translate(cx, cy); ctx.rotate(mid2);
-    ctx.textAlign = "right"; ctx.textBaseline = "middle";
-    ctx.shadowColor = "rgba(0,0,0,.9)"; ctx.shadowBlur = 6;
-    ctx.shadowOffsetX = 2; ctx.shadowOffsetY = 2;
-    ctx.fillStyle = "#ffffff"; ctx.font = "bold 22px 'Segoe UI',sans-serif";
-    const label = players[i] ? players[i].name : "";
-    const txt = label.length > 18 ? label.slice(0,18)+"…" : label;
-    ctx.fillText(txt, r - 18, 0);
-    ctx.restore();
-  }
-  ctx.save(); ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI*2);
-  ctx.strokeStyle = "#a78bfa"; ctx.lineWidth = 6;
-  ctx.shadowColor = "#a78bfa"; ctx.shadowBlur = 25; ctx.stroke(); ctx.restore();
-  ctx.save(); ctx.beginPath(); ctx.arc(cx, cy, r-4, 0, Math.PI*2);
-  ctx.strokeStyle = "#db2777"; ctx.lineWidth = 2;
-  ctx.shadowColor = "#db2777"; ctx.shadowBlur = 15; ctx.stroke(); ctx.restore();
-  ctx.save(); ctx.beginPath(); ctx.arc(cx, cy, 58, 0, Math.PI*2);
-  const hubGrad = ctx.createRadialGradient(cx, cy, 5, cx, cy, 58);
-  hubGrad.addColorStop(0, "#1e293b"); hubGrad.addColorStop(1, "#0a0e1a");
-  ctx.fillStyle = hubGrad; ctx.shadowColor = "#7c3aed"; ctx.shadowBlur = 30; ctx.fill();
-  ctx.restore();
-  ctx.save(); ctx.beginPath(); ctx.arc(cx, cy, 58, 0, Math.PI*2);
-  ctx.strokeStyle = "#fbbf24"; ctx.lineWidth = 4;
-  ctx.shadowColor = "#fbbf24"; ctx.shadowBlur = 20; ctx.stroke(); ctx.restore();
-  ctx.save(); ctx.textAlign = "center"; ctx.textBaseline = "middle";
-  ctx.font = "36px sans-serif"; ctx.shadowColor = "#fbbf24"; ctx.shadowBlur = 20;
-  ctx.fillText("🏆", cx, cy); ctx.restore();
-}
-
 // ===== 1×1 =====
 function renderWheel1v1(s){
   LAST_STATE = s;
+  els.rmScoreline.classList.add("hidden");
+  els.roomExitBtn.classList.add("hidden");
   if(s.waiting){
     els.rmCounter.textContent = `⚔️ Ожидание игроков…`;
     els.roomContent.innerHTML = `<div class="waiting-box">
@@ -1260,16 +1368,18 @@ function start1v1Animation(s){
   const duration = s.last_spin.duration || 8000;
   const serverStart = s.last_spin.started_at || nowServer();
 
+  const pattern = pickSpinPattern();
+  const dir = pattern.dir;
   const span = Math.PI * 2 / n;
   const center = -(winnerIdx + 0.5) * span;
-  const target = center + offsetRatio * span + 8 * Math.PI * 2;
-  const startAngle = target - Math.PI * 2 * 12;
+  const turnsRad = pattern.turns * Math.PI * 2 * dir;
+  const target = center + offsetRatio * span + turnsRad;
+  const startAngle = target - turnsRad;
 
   function setPhase(){
     const el = nowServer() - serverStart;
     const k = Math.min(1, Math.max(0, el / duration));
-    const eased = 1 - Math.pow(1 - k, 4);
-    WHEEL_ANGLE = startAngle + (target - startAngle) * eased;
+    WHEEL_ANGLE = startAngle + (target - startAngle) * pattern.easing(k);
     return k;
   }
   setPhase(); draw1v1Wheel(realCanvas, players);
@@ -1351,6 +1461,8 @@ function draw1v1Wheel(canvas, players){
 // ===== POKER =====
 function renderPoker(s){
   LAST_STATE = s;
+  els.rmScoreline.classList.add("hidden");
+  els.roomExitBtn.classList.add("hidden");
   if(s.table_id !== undefined && s.table_count !== undefined){
     els.rmCounter.textContent = `🃏 Стол ${s.table_id + 1} / ${s.table_count} · Игроков: ${(s.players||[]).length}`;
   }
@@ -1439,9 +1551,11 @@ function makeCard(c){
   return div;
 }
 
-// ===== WHEEL =====
+// ===== WHEEL (рулетка) =====
 function renderWheel(s){
   LAST_STATE = s;
+  els.rmScoreline.classList.add("hidden");
+  els.roomExitBtn.classList.add("hidden");
   if(WHEEL_LOCK){ WHEEL_NEXT = s; return; }
   if(!WHEEL_INITIAL_DONE){
     WHEEL_INITIAL_DONE = true;
@@ -1609,18 +1723,21 @@ function startSpinAnimation(s){
   const n = activeWithElim.length;
   const idx = s.last_spin.sector_index;
   const offsetRatio = s.last_spin.final_offset_ratio || 0;
-  const span = Math.PI * 2 / n;
-  const center = -(idx + 0.5) * span;
-  const target = center + offsetRatio * span + 8 * Math.PI * 2;
-  const startAngle = target - Math.PI * 2 * 12;
   const duration = s.last_spin.duration || 8000;
   const serverStart = s.last_spin.started_at || nowServer();
+
+  const pattern = pickSpinPattern();
+  const dir = pattern.dir;
+  const span = Math.PI * 2 / n;
+  const center = -(idx + 0.5) * span;
+  const turnsRad = pattern.turns * Math.PI * 2 * dir;
+  const target = center + offsetRatio * span + turnsRad;
+  const startAngle = target - turnsRad;
 
   function setPhase(force){
     const el = nowServer() - serverStart;
     const k = Math.min(1, Math.max(0, el / duration));
-    const eased = 1 - Math.pow(1 - k, 4);
-    WHEEL_ANGLE = startAngle + (target - startAngle) * eased;
+    WHEEL_ANGLE = startAngle + (target - startAngle) * pattern.easing(k);
     if(force){ const c = document.getElementById("wheel"); if(c) drawWheel(c, activeWithElim); }
     return k;
   }
