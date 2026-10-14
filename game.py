@@ -12,9 +12,15 @@ RANK_MAP = {r: i for i, r in enumerate(RANKS)}
 SUIT_SYM = {"s": "♠", "h": "♥", "d": "♦", "c": "♣"}
 MAX_TABLE = 7
 
-BRACKET_SERIES_TARGET = 3        # до 3 побед (best-of-5)
-BRACKET_SPIN_DURATION_MS = 20000 # 20 сек один спин
-BRACKET_NEXT_DELAY_S = 3.5       # пауза между спинами в серии
+BRACKET_SERIES_TARGET = 3
+BRACKET_SPIN_DURATION_MS = 20000
+BRACKET_NEXT_DELAY_S = 3.5
+
+# ==== ЗАМКИ ====
+CASTLE_POINTS = [1, 2, 3, 4, 5]
+CASTLE_TOTAL_TROOPS = 100
+CASTLE_REVEAL_DURATION_MS = 9000      # показ результата раунда
+CASTLE_NEXT_DELAY_S = 2.0             # пауза между раундами серии
 
 
 def make_deck(): return [(r, s) for r in RANKS for s in SUITS]
@@ -451,7 +457,7 @@ class BracketMatch:
         self.spin_count = 0
         self.history = []
         self._spin_task_running = False
-        self.pending_winner_idx = None    # индекс победителя текущего (незавершённого) спина
+        self.pending_winner_idx = None
 
     def reset_for_new_spin(self):
         self.room_ready = set()
@@ -519,20 +525,6 @@ class BracketGame:
                 if m.p2 and m.p2["user_id"] == user_id: return m
         return None
 
-    def user_status(self, user_id):
-        if self.winner and self.winner.get("user_id") == user_id:
-            return "winner"
-        for rnd in self.rounds:
-            for m in rnd:
-                if m.finished and m.loser and m.loser.get("user_id") == user_id:
-                    return "eliminated"
-        for rnd in self.rounds:
-            for m in rnd:
-                if m.finished: continue
-                if m.p1 and m.p1["user_id"] == user_id: return "playing"
-                if m.p2 and m.p2["user_id"] == user_id: return "playing"
-        return "waiting"
-
     def _is_user_in_bracket(self, user_id):
         for rnd in self.rounds:
             for m in rnd:
@@ -559,7 +551,6 @@ class BracketGame:
             if len(m.ready) < 2: return False
             m.room_active = True
             return True
-        # наблюдатель: любой участник bracket (включая выбывших)
         return self._is_user_in_bracket(user_id)
 
     def press_room_ready(self, match_id, user_id):
@@ -569,7 +560,6 @@ class BracketGame:
         if user_id not in (m.p1["user_id"], m.p2["user_id"]): return False
         m.room_ready.add(user_id); return True
 
-    # ---- Спин без увеличения счёта (визуальная фаза) ----
     def spin_match(self, match_id):
         m = self.find_match(match_id)
         if not m or m.finished: return None
@@ -586,11 +576,8 @@ class BracketGame:
                        "final_offset_ratio": _rand_offset_ratio()}
         m.pending_winner_idx = idx
         m.history.append({"winner_index": idx, "winner_user_id": winner["user_id"]})
-        logger.info("[BRACKET tid=%s match=%s] spin START #%s pending_winner=%s",
-                    self.tid, match_id, m.spin_count, idx)
         return m
 
-    # ---- Финализация: увеличение счёта, проверка серии ----
     def finalize_spin(self, match_id):
         m = self.find_match(match_id)
         if not m or m.finished: return None, []
@@ -601,11 +588,6 @@ class BracketGame:
         m.pending_winner_idx = None
         advanced_list = []
         series_over = (m.p1_wins >= m.series_target or m.p2_wins >= m.series_target)
-
-        logger.info("[BRACKET tid=%s match=%s] spin FINALIZED #%s: p1_wins=%s p2_wins=%s target=%s over=%s",
-                    self.tid, match_id, m.spin_count, m.p1_wins, m.p2_wins,
-                    m.series_target, series_over)
-
         if series_over:
             m.finished = True
             if m.p1_wins > m.p2_wins:
@@ -621,8 +603,6 @@ class BracketGame:
         if next_round >= len(self.rounds):
             self.finished = True
             self.winner = m.winner
-            logger.info("[BRACKET tid=%s] TOURNAMENT FINISHED winner=%s",
-                        self.tid, m.winner.get("name") if m.winner else "?")
             return advanced_log
         next_match = self.rounds[next_round][m.pos_in_round // 2]
         slot_is_p1 = (m.pos_in_round % 2 == 0)
@@ -652,14 +632,12 @@ class BracketGame:
         has_p2 = m.p2 is not None
 
         if has_p1 and not has_p2:
-            if not self._slot_source_finished(m, 1):
-                return advanced_log
+            if not self._slot_source_finished(m, 1): return advanced_log
             m.finished = True; m.winner = m.p1; m.loser = None
             advanced_log.append(m.p1)
             self._advance_winner(m, advanced_log)
         elif has_p2 and not has_p1:
-            if not self._slot_source_finished(m, 0):
-                return advanced_log
+            if not self._slot_source_finished(m, 0): return advanced_log
             m.finished = True; m.winner = m.p2; m.loser = None
             advanced_log.append(m.p2)
             self._advance_winner(m, advanced_log)
@@ -705,10 +683,441 @@ class BracketGame:
         }
 
 
+# ================== ЗАМКИ ==================
+def evaluate_castle_round(p1_troops, p2_troops):
+    """Возвращает (p1_points, p2_points, per_castle_list)."""
+    p1_points = 0
+    p2_points = 0
+    per_castle = []
+    for i, castle_points in enumerate(CASTLE_POINTS):
+        a = int(p1_troops[i]) if i < len(p1_troops) else 0
+        b = int(p2_troops[i]) if i < len(p2_troops) else 0
+        if a > b:
+            winner = "p1"; p1_points += castle_points
+        elif b > a:
+            winner = "p2"; p2_points += castle_points
+        else:
+            winner = "draw"
+        per_castle.append({
+            "idx": i, "points": castle_points,
+            "p1": a, "p2": b, "winner": winner,
+        })
+    return p1_points, p2_points, per_castle
+
+
+class CastleMatch:
+    """Матч замков. Используется и в 1×1, и в сетке."""
+    def __init__(self, match_id, p1, p2, series_target=3):
+        self.match_id = match_id
+        self.p1 = dict(p1) if p1 else None
+        self.p2 = dict(p2) if p2 else None
+        self.series_target = series_target
+        self.p1_wins = 0
+        self.p2_wins = 0
+        self.finished = False
+        self.winner = None
+        self.loser = None
+        # распределение
+        self.p1_troops = None
+        self.p2_troops = None
+        self.p1_ready = False
+        self.p2_ready = False
+        self.last_round = None
+        self.round_number = 0
+        self.history = []
+
+    def _valid_troops(self, troops):
+        if not isinstance(troops, list) or len(troops) != 5: return False
+        try:
+            t = [int(x) for x in troops]
+        except: return False
+        for x in t:
+            if x < 0 or x > CASTLE_TOTAL_TROOPS: return False
+        if sum(t) != CASTLE_TOTAL_TROOPS: return False
+        return True
+
+    def set_troops(self, user_id, troops):
+        if self.finished: return False
+        if self.p1 and self.p1["user_id"] == user_id:
+            if self.p1_ready: return False
+            if not self._valid_troops(troops): return False
+            self.p1_troops = [int(x) for x in troops]
+            self.p1_ready = True
+            return True
+        if self.p2 and self.p2["user_id"] == user_id:
+            if self.p2_ready: return False
+            if not self._valid_troops(troops): return False
+            self.p2_troops = [int(x) for x in troops]
+            self.p2_ready = True
+            return True
+        return False
+
+    def unset_troops(self, user_id):
+        if self.finished: return False
+        if self.p1 and self.p1["user_id"] == user_id and self.p1_ready:
+            self.p1_troops = None; self.p1_ready = False; return True
+        if self.p2 and self.p2["user_id"] == user_id and self.p2_ready:
+            self.p2_troops = None; self.p2_ready = False; return True
+        return False
+
+    def both_ready(self):
+        return self.p1_ready and self.p2_ready
+
+    def resolve_round(self):
+        if not self.both_ready(): return None
+        self.round_number += 1
+        p1p, p2p, per = evaluate_castle_round(self.p1_troops, self.p2_troops)
+        if p1p > p2p: self.p1_wins += 1; rw = "p1"
+        elif p2p > p1p: self.p2_wins += 1; rw = "p2"
+        else: rw = "draw"
+        self.last_round = {
+            "round": self.round_number,
+            "p1_troops": list(self.p1_troops),
+            "p2_troops": list(self.p2_troops),
+            "p1_points": p1p, "p2_points": p2p,
+            "per_castle": per, "round_winner": rw,
+            "started_at": int(time.time() * 1000),
+        }
+        self.history.append(self.last_round)
+        series_over = (self.p1_wins >= self.series_target or self.p2_wins >= self.series_target)
+        if series_over:
+            self.finished = True
+            if self.p1_wins > self.p2_wins:
+                self.winner = self.p1; self.loser = self.p2
+            elif self.p2_wins > self.p1_wins:
+                self.winner = self.p2; self.loser = self.p1
+        else:
+            self.p1_troops = None
+            self.p2_troops = None
+            self.p1_ready = False
+            self.p2_ready = False
+        return self.last_round
+
+    def to_dict(self, for_user_id=None):
+        my_id = for_user_id
+        # Раскрываем ходы только если оба сдали или матч завершён
+        reveal = self.both_ready() or self.finished
+        return {
+            "type": "castle_match_state",
+            "match_id": self.match_id,
+            "series_target": self.series_target,
+            "p1": self.p1, "p2": self.p2,
+            "p1_wins": self.p1_wins, "p2_wins": self.p2_wins,
+            "p1_ready": self.p1_ready, "p2_ready": self.p2_ready,
+            "round_number": self.round_number,
+            "last_round": self.last_round,
+            "finished": self.finished,
+            "winner": self.winner, "loser": self.loser,
+            "p1_troops": self.p1_troops if (my_id == (self.p1 or {}).get("user_id") or reveal) else None,
+            "p2_troops": self.p2_troops if (my_id == (self.p2 or {}).get("user_id") or reveal) else None,
+        }
+
+
+class Castle1v1Game:
+    """Дуэль замков 1×1."""
+    def __init__(self, tid, p1, p2, prize, series_target=3):
+        self.tid = tid
+        self.prize = prize or "🏆 Приз"
+        self.match = CastleMatch(0, p1, p2, series_target)
+        self.finished = False
+
+    def user_ids(self):
+        ids = []
+        if self.match.p1: ids.append(self.match.p1["user_id"])
+        if self.match.p2: ids.append(self.match.p2["user_id"])
+        return ids
+
+    def set_troops(self, user_id, troops):
+        return self.match.set_troops(user_id, troops)
+
+    def unset_troops(self, user_id):
+        return self.match.unset_troops(user_id)
+
+    def both_ready(self):
+        return self.match.both_ready()
+
+    def resolve_round(self):
+        r = self.match.resolve_round()
+        if r and self.match.finished:
+            self.finished = True
+        return r
+
+    def to_dict(self, for_user_id=None):
+        d = self.match.to_dict(for_user_id=for_user_id)
+        d["tid"] = self.tid
+        d["prize"] = self.prize
+        return d
+
+
+class CastleBracketMatch:
+    """Матч-обёртка для сетки с замками."""
+    def __init__(self, match_id, round_num, pos_in_round, series_target=3):
+        self.match_id = match_id
+        self.round_num = round_num
+        self.pos_in_round = pos_in_round
+        self.series_target = series_target
+        self.p1 = None
+        self.p2 = None
+        self.p1_wins = 0
+        self.p2_wins = 0
+        self.ready = set()
+        self.room_active = False
+        self.room_ready = set()
+        self.finished = False
+        self.winner = None
+        self.loser = None
+        self.last_round = None
+        self.round_number = 0
+        self.history = []
+        self._task_running = False
+        # текущий раунд
+        self.p1_troops = None
+        self.p2_troops = None
+        self.p1_ready = False
+        self.p2_ready = False
+
+    def both_ready(self):
+        return self.p1_ready and self.p2_ready
+
+    def _valid_troops(self, troops):
+        if not isinstance(troops, list) or len(troops) != 5: return False
+        try:
+            t = [int(x) for x in troops]
+        except: return False
+        for x in t:
+            if x < 0 or x > CASTLE_TOTAL_TROOPS: return False
+        if sum(t) != CASTLE_TOTAL_TROOPS: return False
+        return True
+
+    def set_troops(self, user_id, troops):
+        if self.finished: return False
+        if self.p1 and self.p1["user_id"] == user_id:
+            if self.p1_ready: return False
+            if not self._valid_troops(troops): return False
+            self.p1_troops = [int(x) for x in troops]
+            self.p1_ready = True
+            return True
+        if self.p2 and self.p2["user_id"] == user_id:
+            if self.p2_ready: return False
+            if not self._valid_troops(troops): return False
+            self.p2_troops = [int(x) for x in troops]
+            self.p2_ready = True
+            return True
+        return False
+
+    def unset_troops(self, user_id):
+        if self.finished: return False
+        if self.p1 and self.p1["user_id"] == user_id and self.p1_ready:
+            self.p1_troops = None; self.p1_ready = False; return True
+        if self.p2 and self.p2["user_id"] == user_id and self.p2_ready:
+            self.p2_troops = None; self.p2_ready = False; return True
+        return False
+
+    def resolve_round(self):
+        if not self.both_ready(): return None
+        self.round_number += 1
+        p1p, p2p, per = evaluate_castle_round(self.p1_troops, self.p2_troops)
+        if p1p > p2p: self.p1_wins += 1; rw = "p1"
+        elif p2p > p1p: self.p2_wins += 1; rw = "p2"
+        else: rw = "draw"
+        self.last_round = {
+            "round": self.round_number,
+            "p1_troops": list(self.p1_troops),
+            "p2_troops": list(self.p2_troops),
+            "p1_points": p1p, "p2_points": p2p,
+            "per_castle": per, "round_winner": rw,
+            "started_at": int(time.time() * 1000),
+        }
+        self.history.append(self.last_round)
+        series_over = (self.p1_wins >= self.series_target or self.p2_wins >= self.series_target)
+        if not series_over:
+            self.p1_troops = None
+            self.p2_troops = None
+            self.p1_ready = False
+            self.p2_ready = False
+        return self.last_round, series_over
+
+
+class CastleBracketGame:
+    """Турнир с сеткой, где каждый матч — серия замков."""
+    def __init__(self, tid, players, prize, series_target=3):
+        self.tid = tid
+        self.prize = prize or "🏆 Приз"
+        self.size = len(players)
+        self.series_target = max(1, int(series_target))
+
+        n = max(2, self.size)
+        rounds_count = 0
+        while (1 << rounds_count) < n:
+            rounds_count += 1
+        self.total_rounds = max(1, rounds_count)
+
+        self.finished = False
+        self.winner = None
+        self._next_match_id = 0
+        self.rounds: list[list[CastleBracketMatch]] = []
+
+        shuffled = list(players)
+        random.shuffle(shuffled)
+
+        first_round = []
+        for i in range(0, len(shuffled), 2):
+            m = CastleBracketMatch(self._new_id(), 0, len(first_round), self.series_target)
+            m.p1 = shuffled[i] if i < len(shuffled) else None
+            m.p2 = shuffled[i + 1] if i + 1 < len(shuffled) else None
+            first_round.append(m)
+        self.rounds.append(first_round)
+
+        prev = len(first_round)
+        rnum = 1
+        while prev > 1:
+            nxt = (prev + 1) // 2
+            rnd = []
+            for pos in range(nxt):
+                rnd.append(CastleBracketMatch(self._new_id(), rnum, pos, self.series_target))
+            self.rounds.append(rnd)
+            prev = nxt
+            rnum += 1
+
+        logger.info("[CASTLE-BRACKET tid=%s] size=%s target=%s rounds=%s",
+                    tid, self.size, self.series_target, len(self.rounds))
+
+    def _new_id(self):
+        self._next_match_id += 1
+        return self._next_match_id
+
+    def find_match(self, match_id):
+        for rnd in self.rounds:
+            for m in rnd:
+                if m.match_id == match_id: return m
+        return None
+
+    def _is_user_in_bracket(self, user_id):
+        for rnd in self.rounds:
+            for m in rnd:
+                if m.p1 and m.p1["user_id"] == user_id: return True
+                if m.p2 and m.p2["user_id"] == user_id: return True
+        return False
+
+    def press_ready(self, match_id, user_id):
+        m = self.find_match(match_id)
+        if not m or m.finished or not m.p1 or not m.p2: return False
+        if user_id not in (m.p1["user_id"], m.p2["user_id"]): return False
+        m.ready.add(user_id); return True
+
+    def enter_match(self, match_id, user_id, force=False):
+        m = self.find_match(match_id)
+        if not m: return False
+        if force:
+            m.room_active = True
+            return True
+        p1_id = m.p1["user_id"] if m.p1 else None
+        p2_id = m.p2["user_id"] if m.p2 else None
+        if user_id == p1_id or user_id == p2_id:
+            if m.finished or not m.p1 or not m.p2: return False
+            if len(m.ready) < 2: return False
+            m.room_active = True
+            return True
+        return self._is_user_in_bracket(user_id)
+
+    def press_room_ready(self, match_id, user_id):
+        m = self.find_match(match_id)
+        if not m or m.finished or not m.room_active: return False
+        if not m.p1 or not m.p2: return False
+        if user_id not in (m.p1["user_id"], m.p2["user_id"]): return False
+        m.room_ready.add(user_id); return True
+
+    def _advance_winner(self, m, advanced_log=None):
+        if advanced_log is None: advanced_log = []
+        next_round = m.round_num + 1
+        if next_round >= len(self.rounds):
+            self.finished = True
+            self.winner = m.winner
+            return advanced_log
+        next_match = self.rounds[next_round][m.pos_in_round // 2]
+        slot_is_p1 = (m.pos_in_round % 2 == 0)
+        if slot_is_p1:
+            if next_match.p1 is None: next_match.p1 = m.winner
+            else: next_match.p2 = m.winner
+        else:
+            if next_match.p2 is None: next_match.p2 = m.winner
+            else: next_match.p1 = m.winner
+        self.check_auto_advance(next_match.match_id, advanced_log)
+        return advanced_log
+
+    def _slot_source_finished(self, m, slot):
+        if m.round_num == 0: return True
+        prev_round = self.rounds[m.round_num - 1]
+        src_pos = m.pos_in_round * 2 + (0 if slot == 0 else 1)
+        if src_pos >= len(prev_round): return True
+        return prev_round[src_pos].finished
+
+    def check_auto_advance(self, match_id, advanced_log=None):
+        if advanced_log is None: advanced_log = []
+        m = self.find_match(match_id)
+        if not m or m.finished: return advanced_log
+        has_p1 = m.p1 is not None
+        has_p2 = m.p2 is not None
+
+        if has_p1 and not has_p2:
+            if not self._slot_source_finished(m, 1): return advanced_log
+            m.finished = True; m.winner = m.p1; m.loser = None
+            advanced_log.append(m.p1)
+            self._advance_winner(m, advanced_log)
+        elif has_p2 and not has_p1:
+            if not self._slot_source_finished(m, 0): return advanced_log
+            m.finished = True; m.winner = m.p2; m.loser = None
+            advanced_log.append(m.p2)
+            self._advance_winner(m, advanced_log)
+        return advanced_log
+
+    def remove_player(self, uid):
+        advanced_log = []
+        for rnd in self.rounds:
+            for m in rnd:
+                if m.finished: continue
+                if m.p1 and m.p1["user_id"] == uid:
+                    m.p1 = None
+                    self.check_auto_advance(m.match_id, advanced_log)
+                    return advanced_log
+                if m.p2 and m.p2["user_id"] == uid:
+                    m.p2 = None
+                    self.check_auto_advance(m.match_id, advanced_log)
+                    return advanced_log
+        return advanced_log
+
+    def to_dict(self):
+        return {
+            "type": "castle_bracket_state", "tid": self.tid,
+            "size": self.size, "total_rounds": self.total_rounds,
+            "series_target": self.series_target,
+            "prize": self.prize, "finished": self.finished, "winner": self.winner,
+            "rounds": [
+                [{
+                    "match_id": m.match_id, "round_num": m.round_num,
+                    "pos_in_round": m.pos_in_round,
+                    "p1": m.p1, "p2": m.p2,
+                    "p1_wins": m.p1_wins, "p2_wins": m.p2_wins,
+                    "series_target": m.series_target,
+                    "ready": list(m.ready),
+                    "room_active": m.room_active,
+                    "room_ready": list(m.room_ready),
+                    "finished": m.finished, "winner": m.winner, "loser": m.loser,
+                    "round_number": m.round_number,
+                    "last_round": m.last_round,
+                    "p1_ready": m.p1_ready, "p2_ready": m.p2_ready,
+                } for m in rnd] for rnd in self.rounds],
+            "server_now": int(time.time() * 1000),
+        }
+
+
+# ============ ХРАНИЛИЩА ============
 _active_poker: dict[int, PokerGame] = {}
 _active_wheel: dict[int, WheelGame] = {}
 _active_wheel_1v1: dict[int, Wheel1v1Game] = {}
 _active_bracket: dict[int, BracketGame] = {}
+_active_castle_1v1: dict[int, Castle1v1Game] = {}
+_active_castle_bracket: dict[int, CastleBracketGame] = {}
 _connections: dict[int, set] = {}
 
 
@@ -716,10 +1125,15 @@ def get_poker(tid): return _active_poker.get(tid)
 def get_wheel(tid): return _active_wheel.get(tid)
 def get_wheel_1v1(tid): return _active_wheel_1v1.get(tid)
 def get_bracket(tid): return _active_bracket.get(tid)
+def get_castle_1v1(tid): return _active_castle_1v1.get(tid)
+def get_castle_bracket(tid): return _active_castle_bracket.get(tid)
+
 def set_poker(tid, g): _active_poker[tid] = g
 def set_wheel(tid, g): _active_wheel[tid] = g
 def set_wheel_1v1(tid, g): _active_wheel_1v1[tid] = g
 def set_bracket(tid, g): _active_bracket[tid] = g
+def set_castle_1v1(tid, g): _active_castle_1v1[tid] = g
+def set_castle_bracket(tid, g): _active_castle_bracket[tid] = g
 
 
 def connect(tid, ws): _connections.setdefault(tid, set()).add(ws)
