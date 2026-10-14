@@ -7,14 +7,39 @@ from datetime import datetime, timedelta
 from aiogram import Bot, Dispatcher, Router, F
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
+from aiogram.exceptions import TelegramBadRequest, TelegramForbiddenError
 from aiogram.filters import CommandStart, Command, StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import (Message, CallbackQuery, InlineKeyboardMarkup,
                             InlineKeyboardButton, WebAppInfo,
-                            ReplyKeyboardMarkup, KeyboardButton)
+                            ReplyKeyboardMarkup, KeyboardButton, ErrorEvent)
 from dotenv import load_dotenv
 from sqlalchemy import select, func
+
+# ============== SAFE MONKEY-PATCH для callback.answer ==============
+# Telegram возвращает BadRequest, если callback старше 15 минут.
+# Мы глотаем эту ошибку, чтобы не ронять хендлеры.
+_original_cb_answer = CallbackQuery.answer
+
+async def _safe_cb_answer(self, text=None, show_alert=False, *args, **kwargs):
+    try:
+        return await _original_cb_answer(self, text, show_alert, *args, **kwargs)
+    except TelegramBadRequest as e:
+        if "query is too old" in str(e) or "query ID is invalid" in str(e):
+            logging.debug("Suppressed stale cb.answer: %s", e)
+            return None
+        logging.warning("cb.answer TelegramBadRequest: %s", e)
+        return None
+    except TelegramForbiddenError as e:
+        logging.debug("cb.answer Forbidden: %s", e)
+        return None
+    except Exception as e:
+        logging.warning("cb.answer unexpected: %s", e)
+        return None
+
+CallbackQuery.answer = _safe_cb_answer
+# ====================================================================
 
 from database import (init_db, SessionLocal, User, Admin, Ban, Tournament,
                        Participant)
@@ -50,6 +75,25 @@ def _spawn(coro):
 
 
 def esc(s): return html.escape(s or "")
+
+
+async def _safe_edit(cb: CallbackQuery, text: str, **kwargs):
+    """Безопасное редактирование: не падает на старых сообщениях."""
+    try:
+        await cb.message.edit_text(text, **kwargs)
+        return True
+    except TelegramBadRequest as e:
+        s = str(e)
+        if "message is not modified" in s:
+            return True
+        if "message to edit not found" in s or "message can't be edited" in s:
+            try: await cb.message.answer(text, **kwargs); return True
+            except Exception: return False
+        logging.debug("safe_edit suppressed: %s", e)
+        return False
+    except Exception as e:
+        logging.debug("safe_edit error: %s", e)
+        return False
 
 
 async def _is_admin(user_id):
@@ -111,6 +155,21 @@ async def _enrich_names(bot, user_ids):
         try: await s.commit()
         except: pass
     return result
+
+
+async def _resolve_uid(raw: str):
+    async with SessionLocal() as s:
+        if raw.startswith("@"):
+            r = await s.execute(select(User).where(User.username == raw[1:]))
+            u = r.scalar_one_or_none()
+            if not u: return None
+            return u.id
+        try: uid = int(raw)
+        except ValueError: return None
+        u = await s.get(User, uid)
+        if not u:
+            s.add(User(id=uid, first_name=f"Игрок {uid}")); await s.commit()
+        return uid
 
 
 def reply_main_menu(user_id, is_admin):
@@ -600,7 +659,7 @@ async def txt_blacklist(message: Message):
 async def cb_owner_back(cb: CallbackQuery, state: FSMContext):
     if cb.from_user.id != OWNER_ID: await cb.answer("Нет", show_alert=True); return
     await state.clear()
-    await cb.message.edit_text(f"<b>👑 ВЛАДЕЛЕЦ</b>\n{SEP}", reply_markup=owner_menu_kb())
+    await _safe_edit(cb, f"<b>👑 ВЛАДЕЛЕЦ</b>\n{SEP}", reply_markup=owner_menu_kb())
     await cb.answer()
 
 
@@ -608,8 +667,8 @@ async def cb_owner_back(cb: CallbackQuery, state: FSMContext):
 async def cb_add_admin(cb: CallbackQuery, state: FSMContext):
     if cb.from_user.id != OWNER_ID: await cb.answer("Нет", show_alert=True); return
     await state.set_state(OwnerForm.add_admin)
-    await cb.message.edit_text(f"<b>➕ Админ</b>\n{SEP}\nID или @username:",
-                               reply_markup=back_kb("owner_back"))
+    await _safe_edit(cb, f"<b>➕ Админ</b>\n{SEP}\nID или @username:",
+                     reply_markup=back_kb("owner_back"))
     await cb.answer()
 
 
@@ -641,11 +700,11 @@ async def cb_del_admin(cb: CallbackQuery):
     async with SessionLocal() as s:
         r = await s.execute(select(Admin)); admins = r.scalars().all()
     if not admins:
-        await cb.message.edit_text("<blockquote>Пусто.</blockquote>", reply_markup=back_kb("owner_back"))
+        await _safe_edit(cb, "<blockquote>Пусто.</blockquote>", reply_markup=back_kb("owner_back"))
         await cb.answer(); return
     rows = [[InlineKeyboardButton(text=f"❌ {a.user_id}", callback_data=f"owner_rm_{a.user_id}")] for a in admins]
     rows.append([InlineKeyboardButton(text="⬅️ Назад", callback_data="owner_back")])
-    await cb.message.edit_text(f"<b>➖ Удалить</b>\n{SEP}", reply_markup=InlineKeyboardMarkup(inline_keyboard=rows))
+    await _safe_edit(cb, f"<b>➖ Удалить</b>\n{SEP}", reply_markup=InlineKeyboardMarkup(inline_keyboard=rows))
     await cb.answer()
 
 
@@ -670,14 +729,14 @@ async def cb_list_admins(cb: CallbackQuery):
         lines = [f"<b>📋 Админы</b>\n{SEP}"]
         for a in admins: lines.append(f"🔹 <code>{a.user_id}</code> · {a.added_at:%d.%m.%Y}")
         text = "\n".join(lines)
-    await cb.message.edit_text(text, reply_markup=back_kb("owner_back")); await cb.answer()
+    await _safe_edit(cb, text, reply_markup=back_kb("owner_back")); await cb.answer()
 
 
 @router.callback_query(F.data == "owner_ban")
 async def cb_ban(cb: CallbackQuery, state: FSMContext):
     if cb.from_user.id != OWNER_ID: await cb.answer("Нет", show_alert=True); return
     await state.set_state(OwnerForm.ban_id)
-    await cb.message.edit_text(f"<b>🚫 Забанить</b>\n{SEP}\nID:", reply_markup=back_kb("owner_back"))
+    await _safe_edit(cb, f"<b>🚫 Забанить</b>\n{SEP}\nID:", reply_markup=back_kb("owner_back"))
     await cb.answer()
 
 
@@ -699,7 +758,7 @@ async def msg_ban(message: Message, state: FSMContext):
 async def cb_unban(cb: CallbackQuery, state: FSMContext):
     if cb.from_user.id != OWNER_ID: await cb.answer("Нет", show_alert=True); return
     await state.set_state(OwnerForm.unban_id)
-    await cb.message.edit_text(f"<b>✅ Разбанить</b>\n{SEP}\nID:", reply_markup=back_kb("owner_back"))
+    await _safe_edit(cb, f"<b>✅ Разбанить</b>\n{SEP}\nID:", reply_markup=back_kb("owner_back"))
     await cb.answer()
 
 
@@ -725,41 +784,41 @@ async def cb_blacklist(cb: CallbackQuery):
         lines = [f"<b>📜 Чёрный список</b>\n{SEP}"]
         for b in bans: lines.append(f"🚫 <code>{b.user_id}</code> · {b.banned_at:%d.%m.%Y}")
         text = "\n".join(lines)
-    await cb.message.edit_text(text, reply_markup=back_kb("owner_back")); await cb.answer()
+    await _safe_edit(cb, text, reply_markup=back_kb("owner_back")); await cb.answer()
 
 
 @router.callback_query(F.data == "admin_cancel_fsm")
 async def cb_cancel(cb: CallbackQuery, state: FSMContext):
-    await state.clear()
-    await cb.message.edit_text("❌ Отменено."); await cb.answer()
+    try: await state.clear()
+    except: pass
+    await _safe_edit(cb, "❌ Отменено.")
+    await cb.answer()
 
 
 # ========== FSM: Создание турнира ==========
 @router.callback_query(F.data == "tt_access_open")
 async def tt_open(cb: CallbackQuery, state: FSMContext):
     await state.update_data(access_type="open"); await state.set_state(TournamentFSM.game_type)
-    await cb.message.edit_text(f"<b>🆕 Шаг 2</b>\n{SEP}\nИгра:", reply_markup=game_type_kb()); await cb.answer()
+    await _safe_edit(cb, f"<b>🆕 Шаг 2</b>\n{SEP}\nИгра:", reply_markup=game_type_kb()); await cb.answer()
 
 
 @router.callback_query(F.data == "tt_access_closed")
 async def tt_closed(cb: CallbackQuery, state: FSMContext):
     await state.update_data(access_type="closed"); await state.set_state(TournamentFSM.game_type)
-    await cb.message.edit_text(f"<b>🆕 Шаг 2</b>\n{SEP}\nИгра:", reply_markup=game_type_kb()); await cb.answer()
+    await _safe_edit(cb, f"<b>🆕 Шаг 2</b>\n{SEP}\nИгра:", reply_markup=game_type_kb()); await cb.answer()
 
 
 @router.callback_query(F.data == "tt_game_poker")
 async def tt_poker(cb: CallbackQuery, state: FSMContext):
     await state.update_data(game_type="poker"); await state.set_state(TournamentFSM.name)
-    await cb.message.edit_text(f"<b>🆕 Шаг 3</b>\n{SEP}\nНазвание:"); await cb.answer()
+    await _safe_edit(cb, f"<b>🆕 Шаг 3</b>\n{SEP}\nНазвание:"); await cb.answer()
 
 
 @router.callback_query(F.data == "tt_game_wheel")
 async def tt_game_wheel(cb: CallbackQuery, state: FSMContext):
-    # Спрашиваем подтип
     await state.set_state(TournamentFSM.wheel_subtype)
-    await cb.message.edit_text(
-        f"<b>🎡 Колесо Фортуны · Шаг 3</b>\n{SEP}\n"
-        "Выбери <b>подтип</b>:",
+    await _safe_edit(cb,
+        f"<b>🎡 Колесо Фортуны · Шаг 3</b>\n{SEP}\nВыбери <b>подтип</b>:",
         reply_markup=wheel_subtype_kb())
     await cb.answer()
 
@@ -768,7 +827,7 @@ async def tt_game_wheel(cb: CallbackQuery, state: FSMContext):
 async def tt_wheel_general(cb: CallbackQuery, state: FSMContext):
     await state.update_data(game_type="wheel")
     await state.set_state(TournamentFSM.name)
-    await cb.message.edit_text(f"<b>🎡 Колесо (общее) · Шаг 4</b>\n{SEP}\nНазвание турнира:")
+    await _safe_edit(cb, f"<b>🎡 Колесо (общее) · Шаг 4</b>\n{SEP}\nНазвание турнира:")
     await cb.answer()
 
 
@@ -776,14 +835,14 @@ async def tt_wheel_general(cb: CallbackQuery, state: FSMContext):
 async def tt_wheel_1v1(cb: CallbackQuery, state: FSMContext):
     await state.update_data(game_type="wheel_1v1", access_type="closed")
     await state.set_state(TournamentFSM.name)
-    await cb.message.edit_text(f"<b>⚔️ Колесо 1×1 · Шаг 4</b>\n{SEP}\nНазвание турнира:")
+    await _safe_edit(cb, f"<b>⚔️ Колесо 1×1 · Шаг 4</b>\n{SEP}\nНазвание турнира:")
     await cb.answer()
 
 
 @router.callback_query(F.data == "tt_game_castle")
 async def tt_game_castle(cb: CallbackQuery, state: FSMContext):
     await state.set_state(TournamentFSM.castle_subtype)
-    await cb.message.edit_text(
+    await _safe_edit(cb,
         f"<b>🏰 Замки · Шаг 3</b>\n{SEP}\n"
         f"100 войск · 5 замков (1, 2, 3, 4, 5 очков).\n\n"
         "Выбери <b>подтип</b>:",
@@ -795,7 +854,7 @@ async def tt_game_castle(cb: CallbackQuery, state: FSMContext):
 async def tt_castle_1v1(cb: CallbackQuery, state: FSMContext):
     await state.update_data(game_type="castle_1v1", access_type="closed")
     await state.set_state(TournamentFSM.name)
-    await cb.message.edit_text(f"<b>🏰 Замки 1×1 · Шаг 4</b>\n{SEP}\nНазвание турнира:")
+    await _safe_edit(cb, f"<b>🏰 Замки 1×1 · Шаг 4</b>\n{SEP}\nНазвание турнира:")
     await cb.answer()
 
 
@@ -803,7 +862,7 @@ async def tt_castle_1v1(cb: CallbackQuery, state: FSMContext):
 async def tt_castle_bracket(cb: CallbackQuery, state: FSMContext):
     await state.update_data(game_type="castle_bracket")
     await state.set_state(TournamentFSM.name)
-    await cb.message.edit_text(f"<b>🏰 Турнир Замков · Шаг 4</b>\n{SEP}\nНазвание турнира:")
+    await _safe_edit(cb, f"<b>🏰 Турнир Замков · Шаг 4</b>\n{SEP}\nНазвание турнира:")
     await cb.answer()
 
 
@@ -811,7 +870,7 @@ async def tt_castle_bracket(cb: CallbackQuery, state: FSMContext):
 async def tt_bracket(cb: CallbackQuery, state: FSMContext):
     await state.update_data(game_type="bracket")
     await state.set_state(TournamentFSM.name)
-    await cb.message.edit_text(f"<b>🏆 Турнир · Шаг 3</b>\n{SEP}\nНазвание турнира:")
+    await _safe_edit(cb, f"<b>🏆 Турнир · Шаг 3</b>\n{SEP}\nНазвание турнира:")
     await cb.answer()
 
 
@@ -901,21 +960,6 @@ async def tt_castle_p2(message: Message, state: FSMContext):
     await _show_confirm(message, state)
 
 
-async def _resolve_uid(raw: str):
-    async with SessionLocal() as s:
-        if raw.startswith("@"):
-            r = await s.execute(select(User).where(User.username == raw[1:]))
-            u = r.scalar_one_or_none()
-            if not u: return None
-            return u.id
-        try: uid = int(raw)
-        except ValueError: return None
-        u = await s.get(User, uid)
-        if not u:
-            s.add(User(id=uid, first_name=f"Игрок {uid}")); await s.commit()
-        return uid
-
-
 @router.callback_query(F.data.startswith("tt_bracket_"))
 async def tt_bracket_size(cb: CallbackQuery, state: FSMContext):
     try: n = int(cb.data.split("_")[-1])
@@ -924,7 +968,7 @@ async def tt_bracket_size(cb: CallbackQuery, state: FSMContext):
         await cb.answer("Неверный размер", show_alert=True); return
     await state.update_data(bracket_size=n, bracket_players=[], bracket_step=0)
     await state.set_state(TournamentFSM.bracket_series)
-    await cb.message.edit_text(
+    await _safe_edit(cb,
         f"<b>Шаг</b>\n{SEP}\n"
         "До скольких <b>побед</b> играем каждый бой?\n\n"
         "<blockquote>Кто первым наберёт N побед в серии, тот проходит дальше.</blockquote>",
@@ -946,7 +990,7 @@ async def tt_bracket_series(cb: CallbackQuery, state: FSMContext):
     else:
         size = data.get("bracket_size", 4)
         await state.set_state(TournamentFSM.bracket_players)
-        await cb.message.edit_text(
+        await _safe_edit(cb,
             f"<b>Шаг</b>\n{SEP}\nВведи <b>@username</b> или ID <b>игрока 1 из {size}</b>:")
     await cb.answer()
 
@@ -1067,8 +1111,9 @@ async def _show_confirm(message: Message, state: FSMContext):
 async def _show_confirm_from_cb(cb: CallbackQuery, state: FSMContext):
     await state.set_state(TournamentFSM.confirm)
     text = await _build_confirm_text(state)
-    try: await cb.message.edit_text(text, reply_markup=confirm_kb())
-    except: await cb.message.answer(text, reply_markup=confirm_kb())
+    if not await _safe_edit(cb, text, reply_markup=confirm_kb()):
+        try: await cb.message.answer(text, reply_markup=confirm_kb())
+        except Exception: pass
 
 
 @router.callback_query(F.data == "tt_confirm")
@@ -1077,11 +1122,9 @@ async def tt_confirm(cb: CallbackQuery, state: FSMContext):
     if active_count >= MAX_ACTIVE_TOURNAMENTS_PER_ADMIN:
         await state.clear()
         await cb.answer("Лимит активных турниров", show_alert=True)
-        try:
-            await cb.message.edit_text(
-                f"<blockquote>⛔ У тебя уже {active_count} активных турниров. "
-                f"Максимум — {MAX_ACTIVE_TOURNAMENTS_PER_ADMIN}.</blockquote>")
-        except: pass
+        await _safe_edit(cb,
+            f"<blockquote>⛔ У тебя уже {active_count} активных турниров. "
+            f"Максимум — {MAX_ACTIVE_TOURNAMENTS_PER_ADMIN}.</blockquote>")
         return
 
     data = await state.get_data()
@@ -1218,8 +1261,9 @@ async def _show_tournament_menu(cb: CallbackQuery, tid: int):
         text += f"\n<b>⏳ Ожидают подтверждения:</b> <code>{pending_count}</code>"
     text += f"\n<b>🎁 Приз:</b> <i>{esc(t.prize or '—')}</i>"
     kb = manage_tournament_kb(t.id, t.status, t.game_type, t.access_type)
-    try: await cb.message.edit_text(text, reply_markup=kb)
-    except: await cb.message.answer(text, reply_markup=kb)
+    if not await _safe_edit(cb, text, reply_markup=kb):
+        try: await cb.message.answer(text, reply_markup=kb)
+        except Exception: pass
 
 
 async def _show_player_tournament_menu(cb: CallbackQuery, tid: int):
@@ -1237,8 +1281,10 @@ async def _show_player_tournament_menu(cb: CallbackQuery, tid: int):
             f"<b>Статус:</b> <code>{t.status}</code>\n"
             f"<b>Участников:</b> <code>{len(approved)}</code>\n"
             f"<b>🎁 Приз:</b> <i>{esc(t.prize or '—')}</i>")
-    try: await cb.message.edit_text(text, reply_markup=player_tournament_kb(t.id, t.status))
-    except: await cb.message.answer(text, reply_markup=player_tournament_kb(t.id, t.status))
+    kb = player_tournament_kb(t.id, t.status)
+    if not await _safe_edit(cb, text, reply_markup=kb):
+        try: await cb.message.answer(text, reply_markup=kb)
+        except Exception: pass
 
 
 @router.callback_query(F.data == "admin_manage_tournaments")
@@ -1257,8 +1303,8 @@ async def cb_manage(cb: CallbackQuery):
         lock = "🟢" if t.access_type == "open" else "🔴"
         rows.append([InlineKeyboardButton(text=f"{emoji}{lock} {t.name} · {t.status}",
                                           callback_data=f"tt_manage_{t.id}")])
-    await cb.message.edit_text(f"<b>📂</b>\n{SEP}",
-                               reply_markup=InlineKeyboardMarkup(inline_keyboard=rows))
+    await _safe_edit(cb, f"<b>📂</b>\n{SEP}",
+                     reply_markup=InlineKeyboardMarkup(inline_keyboard=rows))
     await cb.answer()
 
 
@@ -1361,14 +1407,14 @@ async def cb_delete_confirm(cb: CallbackQuery):
     _finalized_tids.discard(tid)
     await gm.broadcast(tid, {"type": "tournament_cancelled", "tid": tid})
     await cb.answer("Удалено", show_alert=True)
-    await cb.message.edit_text(f"<b>🗑 Удалён</b>\nID: <code>{tid}</code>")
+    await _safe_edit(cb, f"<b>🗑 Удалён</b>\nID: <code>{tid}</code>")
 
 
 @router.callback_query(F.data.startswith("tt_delete_"))
 async def cb_delete_prompt(cb: CallbackQuery):
     if not await _is_admin(cb.from_user.id): await cb.answer("Нет", show_alert=True); return
     tid = int(cb.data.split("_")[-1])
-    await cb.message.edit_text(
+    await _safe_edit(cb,
         f"<b>⚠️ УДАЛИТЬ?</b>\n{SEP}\nID: <code>{tid}</code>",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="🗑 Да", callback_data=f"tt_delete_confirm_{tid}")],
@@ -1386,14 +1432,14 @@ async def cb_end_confirm(cb: CallbackQuery):
     _finalized_tids.discard(tid)
     await _finalize_tournament(cb.bot, tid, manual=True)
     await cb.answer("Завершено", show_alert=True)
-    await cb.message.edit_text(f"<b>🏁 Завершён вручную</b>\n{SEP}\nID: <code>{tid}</code>")
+    await _safe_edit(cb, f"<b>🏁 Завершён вручную</b>\n{SEP}\nID: <code>{tid}</code>")
 
 
 @router.callback_query(F.data.startswith("tt_end_"))
 async def cb_end_prompt(cb: CallbackQuery):
     if not await _is_admin(cb.from_user.id): await cb.answer("Нет", show_alert=True); return
     tid = int(cb.data.split("_")[-1])
-    await cb.message.edit_text(
+    await _safe_edit(cb,
         f"<b>⚠️ ЗАКОНЧИТЬ?</b>\n{SEP}\nID: <code>{tid}</code>\n\n"
         "<blockquote>Победитель НЕ будет засчитан.</blockquote>",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[
@@ -1534,8 +1580,8 @@ async def cb_invite(cb: CallbackQuery, state: FSMContext):
     if not await _is_admin(cb.from_user.id): await cb.answer("Нет", show_alert=True); return
     tid = int(cb.data.split("_")[-1])
     await state.update_data(invite_tid=tid, is_kick=False); await state.set_state(InviteFSM.user_id)
-    await cb.message.edit_text(f"<b>✉️ Приглашение</b>\n{SEP}\nID или @username:",
-                               reply_markup=back_kb(f"tt_manage_{tid}"))
+    await _safe_edit(cb, f"<b>✉️ Приглашение</b>\n{SEP}\nID или @username:",
+                     reply_markup=back_kb(f"tt_manage_{tid}"))
     await cb.answer()
 
 
@@ -1544,8 +1590,8 @@ async def cb_kick(cb: CallbackQuery, state: FSMContext):
     if not await _is_admin(cb.from_user.id): await cb.answer("Нет", show_alert=True); return
     tid = int(cb.data.split("_")[-1])
     await state.update_data(invite_tid=tid, is_kick=True); await state.set_state(InviteFSM.user_id)
-    await cb.message.edit_text(f"<b>🚫 Кик</b>\n{SEP}\nID или @username:",
-                               reply_markup=back_kb(f"tt_manage_{tid}"))
+    await _safe_edit(cb, f"<b>🚫 Кик</b>\n{SEP}\nID или @username:",
+                     reply_markup=back_kb(f"tt_manage_{tid}"))
     await cb.answer()
 
 
@@ -1667,8 +1713,9 @@ async def cb_my(cb: CallbackQuery):
                                               callback_data=f"tt_player_{t.id}")])
             has = True
     if not has: lines.append("<blockquote>ℹ️ Нет активных.</blockquote>")
-    if rows: await cb.message.edit_text("\n".join(lines), reply_markup=InlineKeyboardMarkup(inline_keyboard=rows))
-    else: await cb.message.edit_text("\n".join(lines))
+    text = "\n".join(lines)
+    if rows: await _safe_edit(cb, text, reply_markup=InlineKeyboardMarkup(inline_keyboard=rows))
+    else: await _safe_edit(cb, text)
     await cb.answer()
 
 
@@ -1680,7 +1727,7 @@ async def cb_open(cb: CallbackQuery):
             Tournament.game_type.notin_(("wheel_1v1", "castle_1v1"))))
         tours = r.scalars().all()
     if not tours:
-        await cb.message.edit_text(f"<b>🌐 Открытые</b>\n{SEP}\n<blockquote>Нет.</blockquote>")
+        await _safe_edit(cb, f"<b>🌐 Открытые</b>\n{SEP}\n<blockquote>Нет.</blockquote>")
         await cb.answer(); return
     lines = [f"<b>🌐 Открытые</b>\n{SEP}"]; rows = []
     for t in tours:
@@ -1689,7 +1736,7 @@ async def cb_open(cb: CallbackQuery):
         lines.append(f"{emoji} <b>{esc(t.name)}</b> · <i>{esc(t.prize or '—')}</i>{extra}")
         rows.append([InlineKeyboardButton(text=f"📩 Заявка · {t.name[:20]}",
                                           callback_data=f"apply_{t.id}")])
-    await cb.message.edit_text("\n".join(lines), reply_markup=InlineKeyboardMarkup(inline_keyboard=rows))
+    await _safe_edit(cb, "\n".join(lines), reply_markup=InlineKeyboardMarkup(inline_keyboard=rows))
     await cb.answer()
 
 
@@ -1742,7 +1789,7 @@ async def cb_approve(cb: CallbackQuery):
             f"<b>✅ Одобрено!</b>\n{SEP}\n🏆 <code>{esc(tname)}</code>\n\n"
             "<blockquote>Жди старт.</blockquote>")
     except: pass
-    await cb.message.edit_text(f"<b>✅ Принят</b>"); await cb.answer("Принято")
+    await _safe_edit(cb, f"<b>✅ Принят</b>"); await cb.answer("Принято")
     if gtype in ("bracket", "castle_bracket"):
         try: await _auto_start_bracket(cb.bot, tid)
         except Exception as e: logging.warning("auto start: %s", e)
@@ -1759,7 +1806,7 @@ async def cb_reject(cb: CallbackQuery):
     try:
         await cb.bot.send_message(uid, f"<b>❌ Отклонена</b>\n🏆 <code>{esc(tname)}</code>")
     except: pass
-    await cb.message.edit_text(f"<b>❌ Отклонён</b>"); await cb.answer("Отклонено")
+    await _safe_edit(cb, f"<b>❌ Отклонён</b>"); await cb.answer("Отклонено")
 
 
 @router.callback_query(F.data.startswith("accept_invite_"))
@@ -1815,11 +1862,11 @@ async def cb_accept_inv(cb: CallbackQuery):
             is_castle_bracket = True
     try:
         if is_bracket or is_castle_bracket:
-            await cb.message.edit_text(
+            await _safe_edit(cb,
                 f"<b>✅ Принято!</b>\n{SEP}\n🏆 <code>{esc(tname)}</code>\n\n"
                 "<blockquote>Ждём остальных участников…</blockquote>")
         else:
-            await cb.message.edit_text(
+            await _safe_edit(cb,
                 f"<b>✅ Принято!</b>\n{SEP}\n🏆 <code>{esc(tname)}</code>\n\n"
                 "<blockquote>Ждём второго игрока...</blockquote>")
     except: pass
@@ -1871,7 +1918,7 @@ async def cb_decline_inv(cb: CallbackQuery):
         await s.commit()
         tname = t.name
     try:
-        await cb.message.edit_text("<blockquote>❌ Приглашение отклонено.</blockquote>")
+        await _safe_edit(cb, "<blockquote>❌ Приглашение отклонено.</blockquote>")
     except: pass
     await cb.answer("Отклонено")
     if cancel_tour:
@@ -2085,8 +2132,21 @@ async def main():
     await init_db()
     bot = Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
     dp = Dispatcher(); dp.include_router(router)
+
+    # Глобальный error-handler: не даёт боту падать на необработанных ошибках хендлеров
+    @dp.errors()
+    async def on_error(event: ErrorEvent):
+        e = event.exception
+        if isinstance(e, TelegramBadRequest):
+            s = str(e)
+            if "query is too old" in s or "query ID is invalid" in s:
+                logging.debug("Suppressed stale callback: %s", s)
+                return True
+        logging.exception("Handler error: %s", e)
+        return True
+
     app = create_app(bot)
-    cfg = uvicorn.Config(app, host=HOST, port=PORT, log_level="info", loop="asyncio")
+    cfg = uvicorn.Config(app, host=HOST, port=PORT, log_level="warning", loop="asyncio")
     server = uvicorn.Server(cfg)
     logging.info("🚀 Бот и Mini App на %s:%s", HOST, PORT)
 
