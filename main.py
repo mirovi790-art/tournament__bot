@@ -11,6 +11,7 @@ from aiogram.exceptions import TelegramBadRequest, TelegramForbiddenError
 from aiogram.filters import (CommandStart, Command, StateFilter, BaseFilter)
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
+from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.types import (Message, CallbackQuery, InlineKeyboardMarkup,
                             InlineKeyboardButton, WebAppInfo,
                             ReplyKeyboardMarkup, KeyboardButton, ErrorEvent)
@@ -64,8 +65,6 @@ MAX_ACTIVE_TOURNAMENTS_PER_ADMIN = 5
 
 # ============ УСТОЙЧИВАЯ МАТЧИНГ-ЛОГИКА ТЕКСТА ============
 def _norm(s: str) -> str:
-    """Оставляет буквы, цифры, пробелы; всё в нижний регистр.
-    Эмодзи и знаки препинания отбрасываются."""
     if not s: return ""
     out = []
     for ch in s:
@@ -74,7 +73,6 @@ def _norm(s: str) -> str:
     return "".join(out).strip()
 
 
-# Все «меню-кнопки» — нужны для отсечения FSM-хендлеров
 _MENU_RAW = [
     "🏆 Турниры", "👤 Профиль", "🆕 Создать турнир", "ℹ️ Помощь",
     "👑 Админство", "🔍 Найти игрока", "⬅️ В главное меню",
@@ -86,7 +84,6 @@ _MENU_NORM = {_norm(x) for x in _MENU_RAW}
 
 
 class TextEq(BaseFilter):
-    """Совпадение текста с одним из вариантов после нормализации."""
     def __init__(self, *variants):
         self.norm = {_norm(v) for v in variants}
     async def __call__(self, message: Message) -> bool:
@@ -95,7 +92,6 @@ class TextEq(BaseFilter):
 
 
 class TextNotMenu(BaseFilter):
-    """True если текст НЕ меню-кнопка. Используется в FSM-хендлерах."""
     async def __call__(self, message: Message) -> bool:
         if not message.text: return True
         return _norm(message.text) not in _MENU_NORM
@@ -113,20 +109,55 @@ def esc(s): return html.escape(s or "")
 
 
 async def _safe_edit(cb: CallbackQuery, text: str, **kwargs):
+    """
+    Безопасное редактирование сообщения.
+    Если reply_markup — ReplyKeyboardMarkup, edit_text не сработает,
+    поэтому отправляем новое сообщение, а у старого убираем inline-кнопки.
+    """
+    rm = kwargs.get("reply_markup")
+    if rm is not None and isinstance(rm, ReplyKeyboardMarkup):
+        try:
+            if cb.message is not None:
+                try:
+                    await cb.message.edit_reply_markup(reply_markup=None)
+                except Exception:
+                    pass
+            await cb.bot.send_message(cb.from_user.id, text, **kwargs)
+            return True
+        except Exception as e:
+            logging.warning("_safe_edit reply-kb fail: %s", e)
+            return False
+
     if cb.message is None:
-        try: await cb.bot.send_message(cb.from_user.id, text, **kwargs); return True
-        except Exception: return False
+        try:
+            await cb.bot.send_message(cb.from_user.id, text, **kwargs); return True
+        except Exception as e:
+            logging.warning("_safe_edit no-msg fail: %s", e); return False
+
     try:
         await cb.message.edit_text(text, **kwargs); return True
     except TelegramBadRequest as e:
         s = str(e)
-        if "message is not modified" in s: return True
-        if "message to edit not found" in s or "message can't be edited" in s:
-            try: await cb.bot.send_message(cb.from_user.id, text, **kwargs); return True
-            except Exception: return False
-        return False
-    except Exception:
-        return False
+        if "message is not modified" in s:
+            return True
+        try:
+            if cb.message is not None:
+                try:
+                    await cb.message.edit_reply_markup(reply_markup=None)
+                except Exception:
+                    pass
+            await cb.bot.send_message(cb.from_user.id, text, **kwargs)
+            return True
+        except Exception as e2:
+            logging.warning("_safe_edit edit→send fail: %s | %s", e, e2)
+            return False
+    except Exception as e:
+        logging.warning("_safe_edit unknown fail: %s", e)
+        try:
+            await cb.bot.send_message(cb.from_user.id, text, **kwargs)
+            return True
+        except Exception:
+            return False
 
 
 async def _is_admin(user_id):
@@ -496,7 +527,7 @@ async def cmd_admin(message: Message, state: FSMContext):
     await message.answer(f"<b>🛠 АДМИН</b>\n{SEP}", reply_markup=owner_menu_kb())
 
 
-# ============ 2. МЕНЮ-КНОПКИ (регистрируются ПЕРВЫМИ) ============
+# ============ 2. МЕНЮ-КНОПКИ ============
 @router.message(TextEq("меню"))
 async def txt_menu_btn(message: Message, state: FSMContext):
     await state.clear()
@@ -2056,6 +2087,15 @@ async def _periodic_cleanup():
 
 
 # ============ 8. FALLBACK ============
+@router.callback_query()
+async def fallback_cb(cb: CallbackQuery):
+    logging.warning("Unhandled callback: %s", cb.data)
+    try:
+        await cb.answer("⚠ Действие недоступно", show_alert=False)
+    except Exception:
+        pass
+
+
 @router.message()
 async def fallback_handler(message: Message, state: FSMContext):
     cur = await state.get_state()
@@ -2076,7 +2116,8 @@ async def main():
     if not BOT_TOKEN: raise SystemExit("❌ BOT_TOKEN не задан")
     await init_db()
     bot = Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
-    dp = Dispatcher(); dp.include_router(router)
+    dp = Dispatcher(storage=MemoryStorage())
+    dp.include_router(router)
 
     @dp.errors()
     async def on_error(event: ErrorEvent):
