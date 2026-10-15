@@ -40,6 +40,8 @@ async def _enrich_names(bot, user_ids):
             u = await s.get(User, uid)
             if u and u.first_name and u.first_name.strip():
                 result[uid] = u.first_name.strip(); continue
+            if gm.is_bot(uid):
+                result[uid] = _display_name(u, uid); continue
             try:
                 chat = await asyncio.wait_for(bot.get_chat(uid), timeout=3.0)
                 fn = (chat.first_name or "").strip(); un = (chat.username or "").strip()
@@ -84,17 +86,6 @@ async def _waiting_state(bot, tid, t, user_id):
     names = await _enrich_names(bot, uids)
     players_info = [{"user_id": uid, "name": names.get(uid, f"Игрок {uid}")} for uid in uids]
 
-    if t.game_type == "poker":
-        return {"type": "poker_state", "tid": tid, "table_id": 0, "table_count": 1,
-                "phase": "waiting", "pot": 0, "community": [], "current_bet": 0,
-                "min_raise": 20, "big_blind": 20, "small_blind": 10,
-                "turn_idx": -1, "turn_deadline": 0, "turn_time": t.turn_time,
-                "dealer_idx": -1, "hand_number": 0, "finished": False,
-                "winner_info": None, "log": ["⏳ Ожидание старта турнира..."],
-                "players": [{"user_id": p["user_id"], "name": p["name"],
-                             "chips": t.start_stack, "bet": 0, "folded": False,
-                             "all_in": False, "place": None, "cards": [], "is_turn": False}
-                            for p in players_info]}
     if t.game_type == "bracket":
         return {"type": "bracket_state", "tid": tid, "size": t.bracket_size,
                 "total_rounds": 0, "prize": t.prize or "🏆 Приз",
@@ -121,6 +112,7 @@ async def _notify_loser_delayed(bot, tid, loser, delay_seconds):
         async with SessionLocal() as s:
             t = await s.get(Tournament, tid)
             tname = t.name if t else "?"
+        if gm.is_bot(loser.get("user_id")): return
         await bot.send_message(
             loser["user_id"],
             f"<b>❌ Вы выбыли из турнира</b>\n➖➖➖➖➖➖➖➖➖\n"
@@ -135,6 +127,7 @@ async def _notify_auto_advanced(bot, tid, player):
         async with SessionLocal() as s:
             t = await s.get(Tournament, tid)
             tname = t.name if t else "?"
+        if gm.is_bot(player.get("user_id")): return
         await bot.send_message(
             player["user_id"],
             f"<b>🏆 Соперник выбыл</b>\n➖➖➖➖➖➖➖➖➖\n"
@@ -144,69 +137,34 @@ async def _notify_auto_advanced(bot, tid, player):
         logging.warning("auto-advance notify fail: %s", e)
 
 
-# ============================================================
-# BRACKET: автоматическая серия спинов (серия до series_target)
-# ============================================================
 async def _run_bracket_series(bot, tid, match_id):
-    """
-    Крутит раунды серии в матче сетки до победы одной из сторон.
-    Двухфазная логика: spin_match (визуально) -> пауза -> finalize_spin (счёт).
-    Защищено от преждевременного выхода и исключений.
-    """
     logging.info("[BRACKET-SERIES start] tid=%s match=%s", tid, match_id)
     try:
         await asyncio.sleep(1.5)
         round_num = 0
         while True:
             g = gm.get_bracket(tid)
-            if not g:
-                logging.warning("[BRACKET-SERIES abort] no game tid=%s", tid)
-                return
+            if not g: return
             m = g.find_match(match_id)
-            if not m:
-                logging.warning("[BRACKET-SERIES abort] no match tid=%s mid=%s", tid, match_id)
-                return
-            if m.finished:
-                logging.info("[BRACKET-SERIES done] match finished tid=%s mid=%s", tid, match_id)
-                return
-            if len(m.room_ready) < 2:
-                logging.warning("[BRACKET-SERIES abort] not enough ready tid=%s mid=%s",
-                                tid, match_id)
-                return
-
+            if not m or m.finished: return
+            if len(m.room_ready) < 2: return
             round_num += 1
-            # Фаза 1: визуальный спин
-            if not g.spin_match(match_id):
-                logging.warning("[BRACKET-SERIES abort] spin_match returned None tid=%s mid=%s",
-                                tid, match_id)
-                return
+            if not g.spin_match(match_id): return
             await gm.broadcast(tid, g.to_dict())
-
-            # Ждём окончания анимации
             await asyncio.sleep(gm.BRACKET_SPIN_DURATION_MS / 1000.0 + 0.5)
-
-            # Фаза 2: финализация счёта
             g = gm.get_bracket(tid)
-            if not g:
-                logging.warning("[BRACKET-SERIES abort] game gone tid=%s", tid)
-                return
+            if not g: return
             m2, advanced_list = g.finalize_spin(match_id)
-            if not m2:
-                logging.warning("[BRACKET-SERIES abort] finalize returned None tid=%s mid=%s",
-                                tid, match_id)
-                return
+            if not m2: return
             await gm.broadcast(tid, g.to_dict())
-            logging.info("[BRACKET-SERIES round %s] tid=%s mid=%s p1=%s p2=%s finished=%s",
+            logging.info("[BRACKET-SERIES round %s] tid=%s mid=%s p1=%s p2=%s fin=%s",
                          round_num, tid, match_id, m2.p1_wins, m2.p2_wins, m2.finished)
-
             if m2.finished:
                 if m2.loser:
                     asyncio.create_task(_notify_loser_delayed(bot, tid, m2.loser, 1.0))
                 for adv in advanced_list or []:
                     asyncio.create_task(_notify_auto_advanced(bot, tid, adv))
                 return
-
-            # Пауза перед следующей серией
             await asyncio.sleep(gm.BRACKET_NEXT_DELAY_S)
     except Exception as e:
         logging.exception("[BRACKET-SERIES error] tid=%s mid=%s: %s", tid, match_id, e)
@@ -214,52 +172,30 @@ async def _run_bracket_series(bot, tid, match_id):
         _bracket_spin_tasks.pop(match_id, None)
 
 
-# ============================================================
-# WHEEL 1×1: автоматическая серия спинов (серия до series_target)
-# ============================================================
 async def _run_wheel1v1_series(bot, tid):
-    """
-    Крутит серию в дуэли 1×1 колеса до победы одной из сторон.
-    """
     logging.info("[WHEEL1V1-SERIES start] tid=%s", tid)
     try:
         await asyncio.sleep(1.5)
         round_num = 0
         while True:
             g = gm.get_wheel_1v1(tid)
-            if not g:
-                logging.warning("[WHEEL1V1-SERIES abort] no game tid=%s", tid)
-                return
-            if g.finished:
-                logging.info("[WHEEL1V1-SERIES done] finished tid=%s", tid)
-                return
-            if not g.both_ready():
-                logging.warning("[WHEEL1V1-SERIES abort] not both ready tid=%s", tid)
-                return
-
+            if not g: return
+            if g.finished: return
+            if not g.both_ready(): return
             round_num += 1
             winner = g.spin()
-            if winner is None:
-                logging.warning("[WHEEL1V1-SERIES abort] spin returned None tid=%s", tid)
-                return
+            if winner is None: return
             await gm.broadcast(tid, g.to_dict())
-
             await asyncio.sleep(gm.WHEEL_1V1_SPIN_DURATION_MS / 1000.0 + 0.5)
-
             g = gm.get_wheel_1v1(tid)
-            if not g:
-                return
+            if not g: return
             result = g.finalize_spin()
-            if not result:
-                return
+            if not result: return
             series_over, _ = result
             await gm.broadcast(tid, g.to_dict())
-            logging.info("[WHEEL1V1-SERIES round %s] tid=%s p1=%s p2=%s finished=%s",
+            logging.info("[WHEEL1V1-SERIES round %s] tid=%s p1=%s p2=%s fin=%s",
                          round_num, tid, g.p1_wins, g.p2_wins, g.finished)
-
-            if series_over:
-                return
-
+            if series_over: return
             await asyncio.sleep(gm.WHEEL_1V1_NEXT_DELAY_S)
     except Exception as e:
         logging.exception("[WHEEL1V1-SERIES error] tid=%s: %s", tid, e)
@@ -421,10 +357,7 @@ def create_app(bot):
         await websocket.accept()
         gm.connect(tid, websocket)
         state = None
-        if t.game_type == "poker":
-            g = gm.get_poker(tid)
-            if g: state = g.to_dict(for_user_id=user_id)
-        elif t.game_type == "wheel_1v1":
+        if t.game_type == "wheel_1v1":
             g = gm.get_wheel_1v1(tid)
             if g: state = g.to_dict()
             else: state = await _waiting_state(bot, tid, t, user_id)
@@ -464,18 +397,7 @@ async def _handle(bot, ws, tid, user_id, msg, t, is_admin):
         target = int(msg.get("user_id", 0) or 0)
         if target: await _admin_kick(bot, tid, t, target)
         return
-    if t.game_type == "poker":
-        g = gm.get_poker(tid)
-        if not g: return
-        if mtype == "poker_action":
-            g.action(user_id, msg.get("action"), int(msg.get("amount", 0) or 0))
-            await _broadcast_poker(tid, g)
-        elif mtype == "start_hand":
-            if getattr(g, "finished", False): return
-            g.start_hand(); await _broadcast_poker(tid, g)
-        elif mtype == "request_state":
-            await ws.send_json(g.to_dict(for_user_id=user_id))
-    elif t.game_type == "wheel_1v1":
+    if t.game_type == "wheel_1v1":
         g = gm.get_wheel_1v1(tid)
         if not g: return
         if mtype == "request_state":
@@ -520,7 +442,6 @@ async def _handle(bot, ws, tid, user_id, msg, t, is_admin):
 
 
 async def _handle_1v1_ready(bot, tid, user_id):
-    """При получении ready от игрока — если оба готовы, запускаем серию."""
     g = gm.get_wheel_1v1(tid)
     if not g or g.finished: return
     if user_id not in g.user_ids(): return
@@ -533,7 +454,7 @@ async def _handle_1v1_ready(bot, tid, user_id):
 
 async def _admin_end(bot, tid):
     from main import _finalize_tournament, _finalized_tids
-    for d in (gm._active_poker, gm._active_wheel, gm._active_wheel_1v1, gm._active_bracket):
+    for d in (gm._active_wheel, gm._active_wheel_1v1, gm._active_bracket):
         d.pop(tid, None)
     _finalized_tids.discard(tid)
     try: await _finalize_tournament(bot, tid, manual=True)
@@ -548,19 +469,7 @@ async def _admin_kick(bot, tid, t, target_uid):
         if p: p.status = "kicked"; await s.commit()
 
     tname = t.name
-    if t.game_type == "poker":
-        g = gm.get_poker(tid)
-        if g:
-            for tb in g.tables:
-                for pl in tb.players:
-                    if pl.user_id == target_uid and pl.chips > 0:
-                        pl.folded = True; pl.chips = 0
-                        if pl.place is None:
-                            alive = [x for x in tb.players if x.chips > 0]
-                            pl.place = len(alive) + 1
-                        break
-            await _broadcast_poker(tid, g)
-    elif t.game_type == "wheel":
+    if t.game_type == "wheel":
         g = gm.get_wheel(tid)
         if g:
             for a in list(g.active):
@@ -581,11 +490,12 @@ async def _admin_kick(bot, tid, t, target_uid):
                 asyncio.create_task(_notify_auto_advanced(bot, tid, adv))
             await gm.broadcast(tid, g.to_dict())
 
-    try:
-        await bot.send_message(target_uid,
-            f"<b>🚫 Вас исключили из турнира</b>\n➖➖➖➖➖➖➖➖➖\n"
-            f"🏆 <code>{_esc(tname)}</code>")
-    except: pass
+    if not gm.is_bot(target_uid):
+        try:
+            await bot.send_message(target_uid,
+                f"<b>🚫 Вас исключили из турнира</b>\n➖➖➖➖➖➖➖➖➖\n"
+                f"🏆 <code>{_esc(tname)}</code>")
+        except: pass
 
     await gm.broadcast(tid, {"type": "player_kicked", "tid": tid, "user_id": target_uid})
 
@@ -597,19 +507,7 @@ async def _handle_leave(bot, ws, tid, user_id, t):
         p = r.scalar_one_or_none()
         if p: p.status = "left"; await s.commit()
 
-    if t.game_type == "poker":
-        g = gm.get_poker(tid)
-        if g:
-            for tb in g.tables:
-                for pl in tb.players:
-                    if pl.user_id == user_id:
-                        pl.folded = True; pl.chips = 0
-                        if pl.place is None:
-                            alive = [x for x in tb.players if x.chips > 0]
-                            pl.place = len(alive) + 1
-                        break
-            await _broadcast_poker(tid, g)
-    elif t.game_type == "wheel":
+    if t.game_type == "wheel":
         g = gm.get_wheel(tid)
         if g:
             for a in list(g.active):
@@ -632,10 +530,3 @@ async def _handle_leave(bot, ws, tid, user_id, t):
 
     try: await ws.send_json({"type": "left_tournament"})
     except: pass
-
-
-async def _broadcast_poker(tid, g):
-    if not gm._connections.get(tid): return
-    for ws in gm._connections[tid]:
-        try: await ws.send_json(g.to_dict())
-        except Exception: gm.disconnect(tid, ws)
