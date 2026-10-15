@@ -755,10 +755,10 @@ document.querySelectorAll("#tabs .tab").forEach(t=>{
     else {show(els.tournamentsView); loadTournaments();}
   });
 });
-document.querySelectorAll(".room-tab").forEach(t=>{
+document.querySelectorAll("#room-tabs .tab").forEach(t=>{
   t.addEventListener("click",()=>{
     ACTIVE_ROOM_TAB = t.dataset.rtab;
-    document.querySelectorAll(".room-tab").forEach(x=>x.classList.remove("active"));
+    document.querySelectorAll("#room-tabs .tab").forEach(x=>x.classList.remove("active"));
     t.classList.add("active");
     if(ACTIVE_ROOM_TAB === "bracket"){
       hide(els.roomContent); show(els.bracketContent);
@@ -806,7 +806,7 @@ async function loadTournaments(){
       const emoji = t.game_type === "poker" ? "🃏" : (t.game_type === "wheel_1v1" ? "⚔️" : (t.game_type === "bracket" ? "🏆" : "🎡"));
       const gameName = t.game_type === "poker" ? "Покер"
         : (t.game_type === "wheel_1v1" ? "Колесо 1×1"
-        : (t.game_type === "bracket" ? "Турнир с сеткой" : "Колесо Фортуны"));
+        : (t.game_type === "bracket" ? "Турнир" : "Колесо Фортуны"));
       let canStart = t.status === "running" || t.status === "paused";
       let btnLabel = canStart ? "🎮 НАЧАТЬ" : (t.status === "registration" ? "⏳ Ожидание" : "🏁 Завершён");
       let disabled = !canStart;
@@ -872,8 +872,8 @@ async function openRoom(tid){
     if(IS_ADMIN) show(els.adminToolbar); else hide(els.adminToolbar);
     if(info.game_type === "bracket"){
       show(els.roomTabs);
-      document.querySelectorAll(".room-tab").forEach(x=>x.classList.remove("active"));
-      document.querySelector('.room-tab[data-rtab="bracket"]').classList.add("active");
+      document.querySelectorAll("#room-tabs .tab").forEach(x=>x.classList.remove("active"));
+      document.querySelector('#room-tabs .tab[data-rtab="bracket"]').classList.add("active");
       hide(els.roomContent); show(els.bracketContent);
     } else {
       hide(els.roomTabs);
@@ -1108,8 +1108,8 @@ function openBracketRoom(mid){
   } else BRACKET_MATCH_LAST_SPIN_SHOWN[mid] = 0;
   wsSend({type:"bracket_enter", match_id: mid});
   ACTIVE_ROOM_TAB = "main";
-  document.querySelectorAll(".room-tab").forEach(x=>x.classList.remove("active"));
-  const mainTab = document.querySelector('.room-tab[data-rtab="main"]');
+  document.querySelectorAll("#room-tabs .tab").forEach(x=>x.classList.remove("active"));
+  const mainTab = document.querySelector('#room-tabs .tab[data-rtab="main"]');
   if(mainTab) mainTab.classList.add("active");
   hide(els.bracketContent); show(els.roomContent);
   els.roomExitBtn.classList.remove("hidden");
@@ -1272,8 +1272,8 @@ function showMatchResult(match_id){
       BRACKET_ACTIVE_MATCH_ID = null;
       WCACHE = {key:"",halo:null,sectors:null,hub:null,size:0};
       ACTIVE_ROOM_TAB = "bracket";
-      document.querySelectorAll(".room-tab").forEach(x=>x.classList.remove("active"));
-      const bt = document.querySelector('.room-tab[data-rtab="bracket"]');
+      document.querySelectorAll("#room-tabs .tab").forEach(x=>x.classList.remove("active"));
+      const bt = document.querySelector('#room-tabs .tab[data-rtab="bracket"]');
       if(bt) bt.classList.add("active");
       hide(els.roomContent); show(els.bracketContent);
       els.roomExitBtn.classList.add("hidden");
@@ -1412,7 +1412,6 @@ function _buildWheelSectors(players, size){
   const ctx = cv.getContext("2d");
   const cx = size/2, cy = size/2, r = size/2 - 30;
   const n = Math.max(players.length, 1);
-  /* Палитра оранжевый-красный как на скрине */
   const palette = [
     {fill:["#ffb04d","#cc6600"], glow:"#ff9500"},
     {fill:["#e6192b","#7a0008"], glow:"#dc143c"},
@@ -1428,12 +1427,10 @@ function _buildWheelSectors(players, size){
     grad.addColorStop(0, col.fill[0]); grad.addColorStop(1, col.fill[1]);
     ctx.beginPath(); ctx.moveTo(cx,cy); ctx.arc(cx,cy,r,a0,a1); ctx.closePath();
     ctx.fillStyle = grad; ctx.fill();
-    /* Тонкая разделительная линия */
     ctx.save();
     ctx.strokeStyle = "rgba(0,0,0,.4)"; ctx.lineWidth = 2;
     ctx.beginPath(); ctx.moveTo(cx,cy); ctx.lineTo(cx + r*Math.cos(a0), cy + r*Math.sin(a0)); ctx.stroke();
     ctx.restore();
-    /* Имя */
     const mid = (a0+a1)/2;
     ctx.save(); ctx.translate(cx,cy); ctx.rotate(mid);
     ctx.textAlign = "right"; ctx.textBaseline = "middle";
@@ -1442,14 +1439,12 @@ function _buildWheelSectors(players, size){
     const label = players[i] ? players[i].name : "";
     const txt = label.length > 18 ? label.slice(0,18)+"…" : label;
     ctx.fillText(txt, r - 18, 0); ctx.restore();
-    /* Кружок-точка перед именем */
     ctx.save(); ctx.translate(cx,cy); ctx.rotate(mid);
     const dotX = r - 22 - ctx.measureText(txt).width - 8;
     ctx.beginPath(); ctx.arc(dotX, 0, 5, 0, Math.PI*2);
     ctx.fillStyle = "#4ade80"; ctx.shadowColor = "#22c55e"; ctx.shadowBlur = 8; ctx.fill();
     ctx.restore();
   }
-  /* Внутренний золотой обод */
   const innerR = r - 4;
   ctx.save(); ctx.beginPath(); ctx.arc(cx,cy,innerR,0,Math.PI*2);
   const ringGrad = ctx.createLinearGradient(0,0,size,size);
@@ -1461,7 +1456,6 @@ function _buildWheelOuterRing(size){
   const cv = document.createElement("canvas"); cv.width = size; cv.height = size;
   const ctx = cv.getContext("2d");
   const cx = size/2, cy = size/2, r = size/2 - 20;
-  /* Внешний толстый золотой обод */
   ctx.save();
   const outerGrad = ctx.createLinearGradient(0,0,size,size);
   outerGrad.addColorStop(0,"#ffe680"); outerGrad.addColorStop(0.3,"#c89020");
@@ -1471,12 +1465,10 @@ function _buildWheelOuterRing(size){
   ctx.strokeStyle = outerGrad; ctx.lineWidth = 12;
   ctx.shadowColor = "rgba(255,180,60,.8)"; ctx.shadowBlur = 30; ctx.stroke();
   ctx.restore();
-  /* Внутренняя тёмная прослойка */
   ctx.save();
   ctx.beginPath(); ctx.arc(cx,cy,r-11,0,Math.PI*2);
   ctx.strokeStyle = "rgba(20,15,5,.9)"; ctx.lineWidth = 2; ctx.stroke();
   ctx.restore();
-  /* Защипки по ободу (точки) */
   for(let i = 0; i < 24; i++){
     const a = (i/24)*Math.PI*2;
     const x = cx + (r-4) * Math.cos(a);
@@ -1493,28 +1485,24 @@ function _buildWheelHub(size){
   const ctx = cv.getContext("2d");
   const cx = size/2, cy = size/2;
   const hubR = 62;
-  /* Внешнее свечение */
   ctx.save();
   const glowGrad = ctx.createRadialGradient(cx,cy,hubR*0.6,cx,cy,hubR+20);
   glowGrad.addColorStop(0,"rgba(255,180,60,.6)"); glowGrad.addColorStop(1,"rgba(255,140,0,0)");
   ctx.beginPath(); ctx.arc(cx,cy,hubR+20,0,Math.PI*2);
   ctx.fillStyle = glowGrad; ctx.fill();
   ctx.restore();
-  /* Золотое кольцо */
   ctx.save();
   ctx.beginPath(); ctx.arc(cx,cy,hubR,0,Math.PI*2);
   const ringGrad = ctx.createRadialGradient(cx,cy,hubR*0.7,cx,cy,hubR);
   ringGrad.addColorStop(0,"#ffe680"); ringGrad.addColorStop(0.5,"#d4a017"); ringGrad.addColorStop(1,"#8b6508");
   ctx.fillStyle = ringGrad; ctx.fill();
   ctx.restore();
-  /* Тёмный центр */
   ctx.save();
   ctx.beginPath(); ctx.arc(cx,cy,hubR-6,0,Math.PI*2);
   const hubGrad = ctx.createRadialGradient(cx,cy,hubR*0.1,cx,cy,hubR-6);
   hubGrad.addColorStop(0,"#2a1f10"); hubGrad.addColorStop(1,"#0a0a0a");
   ctx.fillStyle = hubGrad; ctx.shadowColor = "rgba(255,180,60,.6)"; ctx.shadowBlur = 20; ctx.fill();
   ctx.restore();
-  /* Иконка-эмодзи по центру (эмодзи "🎡") */
   ctx.save(); ctx.textAlign = "center"; ctx.textBaseline = "middle";
   ctx.font = "44px sans-serif";
   ctx.shadowColor = "#ffcc00"; ctx.shadowBlur = 18;
@@ -1540,11 +1528,9 @@ function _drawBracketWheelFrame(canvas, players, match_id){
   const cache = _getWheelCache(players, key, W);
   ctx.clearRect(0,0,W,H);
   ctx.drawImage(cache.halo, 0, 0);
-  /* Вращающиеся сектора */
   ctx.save(); ctx.translate(cx,cy); ctx.rotate(WHEEL_ANGLE);
   ctx.drawImage(cache.sectors, -W/2, -H/2);
   ctx.restore();
-  /* Статичные слои сверху */
   ctx.drawImage(cache.outer, 0, 0);
   ctx.drawImage(cache.hub, 0, 0);
 }
@@ -1696,7 +1682,6 @@ function drawWheel1v1UI(s){
     bottomHtml += `<div class="bottom-title">Наблюдение</div>`;
     bottomHtml += `<div class="bottom-info">👁 Вы наблюдаете</div>`;
   }
-  /* Участники */
   let participantsHtml = `<div class="participants"><div class="participants-frame"><h3>👥 Участники (${players.length})</h3><div class="p-list">`;
   players.forEach(p=>{
     const r = readyIds.has(p.user_id);
@@ -1965,7 +1950,6 @@ function drawWheel(canvas, active){
   const ctx = canvas.getContext("2d");
   const W = canvas.width, H = canvas.height, cx = W/2, cy = H/2, r = Math.min(W,H)/2 - 30;
   ctx.clearRect(0,0,W,H);
-  /* Halo */
   const haloGrad = ctx.createRadialGradient(cx,cy,r*0.55,cx,cy,r+30);
   haloGrad.addColorStop(0,"rgba(220,20,60,0)");
   haloGrad.addColorStop(0.65,"rgba(255,140,0,0.22)");
@@ -2002,7 +1986,6 @@ function drawWheel(canvas, active){
     const txt = label.length > 14 ? label.slice(0,14)+"…" : label;
     ctx.fillText(txt, r - 18, 0); ctx.restore();
   }
-  /* Золотой внешний обод */
   ctx.save();
   const outerGrad = ctx.createLinearGradient(0,0,W,H);
   outerGrad.addColorStop(0,"#ffe680"); outerGrad.addColorStop(0.5,"#ffcc00"); outerGrad.addColorStop(1,"#a07010");
