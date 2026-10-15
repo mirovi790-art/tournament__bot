@@ -9,18 +9,25 @@ import time
 from urllib.parse import parse_qsl
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, HTMLResponse
 from sqlalchemy import select, func
 
 from database import SessionLocal, User, Tournament, Participant, Ban, Admin
 import game as gm
 
-BOT_TOKEN = os.getenv("BOT_TOKEN", "")
-OWNER_ID = int(os.getenv("OWNER_ID", "0") or "0")
 HERE = os.path.dirname(os.path.abspath(__file__))
 
-_bracket_spin_tasks: dict[int, asyncio.Task] = {}
-_wheel1v1_spin_tasks: dict[int, asyncio.Task] = {}
+_bracket_spin_tasks = {}
+_wheel1v1_spin_tasks = {}
+
+
+def _get_bot_token():
+    return os.getenv("BOT_TOKEN", "")
+
+
+def _get_owner_id():
+    try: return int(os.getenv("OWNER_ID", "0") or "0")
+    except Exception: return 0
 
 
 def _esc(s): return html.escape(s or "")
@@ -60,13 +67,14 @@ async def _enrich_names(bot, user_ids):
 
 
 def validate_init_data(init_data):
-    if not init_data or not BOT_TOKEN: return None
+    bot_token = _get_bot_token()
+    if not init_data or not bot_token: return None
     try:
         parsed = dict(parse_qsl(init_data, strict_parsing=True))
         received_hash = parsed.pop("hash", None)
         if not received_hash: return None
         data_check_string = "\n".join(f"{k}={v}" for k, v in sorted(parsed.items()))
-        secret_key = hmac.new(b"WebAppData", BOT_TOKEN.encode(), hashlib.sha256).digest()
+        secret_key = hmac.new(b"WebAppData", bot_token.encode(), hashlib.sha256).digest()
         calc = hmac.new(secret_key, data_check_string.encode(), hashlib.sha256).hexdigest()
         if not hmac.compare_digest(calc, received_hash): return None
         uj = parsed.get("user")
@@ -141,14 +149,12 @@ async def _run_bracket_series(bot, tid, match_id):
     logging.info("[BRACKET-SERIES start] tid=%s match=%s", tid, match_id)
     try:
         await asyncio.sleep(1.5)
-        round_num = 0
         while True:
             g = gm.get_bracket(tid)
             if not g: return
             m = g.find_match(match_id)
             if not m or m.finished: return
             if len(m.room_ready) < 2: return
-            round_num += 1
             if not g.spin_match(match_id): return
             await gm.broadcast(tid, g.to_dict())
             await asyncio.sleep(gm.BRACKET_SPIN_DURATION_MS / 1000.0 + 0.5)
@@ -157,8 +163,6 @@ async def _run_bracket_series(bot, tid, match_id):
             m2, advanced_list = g.finalize_spin(match_id)
             if not m2: return
             await gm.broadcast(tid, g.to_dict())
-            logging.info("[BRACKET-SERIES round %s] tid=%s mid=%s p1=%s p2=%s fin=%s",
-                         round_num, tid, match_id, m2.p1_wins, m2.p2_wins, m2.finished)
             if m2.finished:
                 if m2.loser:
                     asyncio.create_task(_notify_loser_delayed(bot, tid, m2.loser, 1.0))
@@ -176,13 +180,11 @@ async def _run_wheel1v1_series(bot, tid):
     logging.info("[WHEEL1V1-SERIES start] tid=%s", tid)
     try:
         await asyncio.sleep(1.5)
-        round_num = 0
         while True:
             g = gm.get_wheel_1v1(tid)
             if not g: return
             if g.finished: return
             if not g.both_ready(): return
-            round_num += 1
             winner = g.spin()
             if winner is None: return
             await gm.broadcast(tid, g.to_dict())
@@ -193,8 +195,6 @@ async def _run_wheel1v1_series(bot, tid):
             if not result: return
             series_over, _ = result
             await gm.broadcast(tid, g.to_dict())
-            logging.info("[WHEEL1V1-SERIES round %s] tid=%s p1=%s p2=%s fin=%s",
-                         round_num, tid, g.p1_wins, g.p2_wins, g.finished)
             if series_over: return
             await asyncio.sleep(gm.WHEEL_1V1_NEXT_DELAY_S)
     except Exception as e:
@@ -208,11 +208,14 @@ def create_app(bot):
 
     @app.get("/")
     async def index():
-        return FileResponse(os.path.join(HERE, "index.html"))
+        path = os.path.join(HERE, "index.html")
+        if not os.path.exists(path):
+            return HTMLResponse("<h1>index.html not found</h1>", status_code=500)
+        return FileResponse(path)
 
     @app.get("/api/health")
     async def health():
-        return {"ok": True, "ts": time.time()}
+        return {"ok": True, "ts": time.time(), "bot_token_set": bool(_get_bot_token())}
 
     @app.get("/api/profile")
     async def api_profile(initData: str):
@@ -221,7 +224,7 @@ def create_app(bot):
         u_obj = parsed.get("user_obj", {})
         user_id = u_obj.get("id")
         if not user_id: raise HTTPException(status_code=401, detail="No user")
-        is_owner = (OWNER_ID and user_id == OWNER_ID)
+        is_owner = (_get_owner_id() and user_id == _get_owner_id())
         async with SessionLocal() as s:
             if await s.get(Ban, user_id):
                 raise HTTPException(status_code=403, detail="Banned")
