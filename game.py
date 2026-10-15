@@ -19,6 +19,17 @@ WHEEL_1V1_SPIN_DURATION_MS = 8000
 WHEEL_1V1_NEXT_DELAY_S = 2.5
 WHEEL_GENERAL_SPIN_DURATION_MS = 8000
 
+# ============ БОТЫ ============
+BOT_ID_BASE = 9_000_000_000  # ID ботов >= 9e9 (не пересекается с реальными TG ID)
+
+
+def is_bot(uid):
+    """True если user_id принадлежит тестовому боту."""
+    try:
+        return int(uid) >= BOT_ID_BASE
+    except Exception:
+        return False
+
 
 def make_deck(): return [(r, s) for r in RANKS for s in SUITS]
 def card_str(c): return f"{c[0]}{SUIT_SYM[c[1]]}"
@@ -401,8 +412,6 @@ class WheelGame:
 
 
 class Wheel1v1Game:
-    """Дуэль 1×1 на колесе. Серия до series_target побед (1/2/3)."""
-
     def __init__(self, tid, p1, p2, prize, series_target=1):
         self.tid = tid
         self.prize = prize or "🏆 Приз"
@@ -416,6 +425,10 @@ class Wheel1v1Game:
         self.winner = None
         self.last_spin = None
         self.pending_winner_idx = None
+        # Авто-готовность ботов
+        for p in self.players:
+            if is_bot(p.get("user_id")):
+                self.ready.add(p["user_id"])
 
     def user_ids(self):
         return [p["user_id"] for p in self.players]
@@ -445,7 +458,6 @@ class Wheel1v1Game:
         return winner
 
     def finalize_spin(self):
-        """Возвращает (series_over, winner)."""
         if self.pending_winner_idx is None: return None
         idx = self.pending_winner_idx
         if idx == 0: self.p1_wins += 1
@@ -534,8 +546,24 @@ class BracketGame:
             prev = nxt
             rnum += 1
 
+        # Авто-готовность ботов во всех матчах
+        for rnd in self.rounds:
+            for m in rnd:
+                self._mark_bot_ready(m)
+
         logger.info("[BRACKET tid=%s] created size=%s target=%s rounds=%s",
                     tid, self.size, self.series_target, len(self.rounds))
+
+    def _mark_bot_ready(self, m):
+        """Если в матче играет бот — сразу отметить его готовым."""
+        for p in (m.p1, m.p2):
+            if p and is_bot(p.get("user_id")):
+                m.ready.add(p["user_id"])
+                m.room_ready.add(p["user_id"])
+        # Если оба игрока — боты, пометим матч как активную комнату
+        if m.p1 and m.p2:
+            if is_bot(m.p1.get("user_id")) and is_bot(m.p2.get("user_id")):
+                m.room_active = True
 
     def _new_id(self):
         self._next_match_id += 1
@@ -593,6 +621,8 @@ class BracketGame:
     def spin_match(self, match_id):
         m = self.find_match(match_id)
         if not m or m.finished: return None
+        # Автоготовность ботов перед проверкой
+        self._mark_bot_ready(m)
         if len(m.room_ready) < 2: return None
         if m.pending_winner_idx is not None: return None
         idx = random.randrange(2)
@@ -641,6 +671,8 @@ class BracketGame:
         else:
             if next_match.p2 is None: next_match.p2 = m.winner
             else: next_match.p1 = m.winner
+        # Автоготовность бота в новом матче
+        self._mark_bot_ready(next_match)
         self.check_auto_advance(next_match.match_id, advanced_log)
         return advanced_log
 
