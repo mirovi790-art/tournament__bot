@@ -151,18 +151,50 @@ async def _run_bracket_series(bot, tid, match_id):
         await asyncio.sleep(1.5)
         while True:
             g = gm.get_bracket(tid)
-            if not g: return
+            if not g:
+                logging.info("[BRACKET-SERIES end] game gone tid=%s", tid)
+                return
             m = g.find_match(match_id)
-            if not m or m.finished: return
-            if len(m.room_ready) < 2: return
-            if not g.spin_match(match_id): return
+            if not m:
+                logging.info("[BRACKET-SERIES end] match gone tid=%s mid=%s", tid, match_id)
+                return
+            if m.finished:
+                logging.info("[BRACKET-SERIES end] match finished tid=%s mid=%s", tid, match_id)
+                return
+            if len(m.room_ready) < 2:
+                logging.info("[BRACKET-SERIES end] not ready tid=%s mid=%s rr=%s",
+                             tid, match_id, list(m.room_ready))
+                return
+            # Защитный сброс: если pending_winner_idx залип — сбрасываем,
+            # иначе spin_match вернёт None и цикл молча выйдет.
+            if m.pending_winner_idx is not None:
+                logging.warning("[BRACKET-SERIES] resetting stale pending_winner_idx "
+                                "tid=%s mid=%s", tid, match_id)
+                m.pending_winner_idx = None
+            spun = g.spin_match(match_id)
+            if not spun:
+                logging.warning("[BRACKET-SERIES] spin_match returned None tid=%s mid=%s",
+                                tid, match_id)
+                return
             await gm.broadcast(tid, g.to_dict())
+            logging.info("[BRACKET-SERIES] spin #%s broadcast tid=%s mid=%s",
+                         spun.spin_count, tid, match_id)
+
             await asyncio.sleep(gm.BRACKET_SPIN_DURATION_MS / 1000.0 + 0.5)
+
             g = gm.get_bracket(tid)
-            if not g: return
+            if not g:
+                logging.info("[BRACKET-SERIES end] game gone after spin tid=%s", tid)
+                return
             m2, advanced_list = g.finalize_spin(match_id)
-            if not m2: return
+            if not m2:
+                logging.warning("[BRACKET-SERIES] finalize_spin returned None tid=%s mid=%s",
+                                tid, match_id)
+                return
             await gm.broadcast(tid, g.to_dict())
+            logging.info("[BRACKET-SERIES] finalized tid=%s mid=%s p1w=%s p2w=%s finished=%s",
+                         tid, match_id, m2.p1_wins, m2.p2_wins, m2.finished)
+
             if m2.finished:
                 if m2.loser:
                     asyncio.create_task(_notify_loser_delayed(bot, tid, m2.loser, 1.0))
@@ -170,6 +202,9 @@ async def _run_bracket_series(bot, tid, match_id):
                     asyncio.create_task(_notify_auto_advanced(bot, tid, adv))
                 return
             await asyncio.sleep(gm.BRACKET_NEXT_DELAY_S)
+    except asyncio.CancelledError:
+        logging.info("[BRACKET-SERIES cancelled] tid=%s mid=%s", tid, match_id)
+        raise
     except Exception as e:
         logging.exception("[BRACKET-SERIES error] tid=%s mid=%s: %s", tid, match_id, e)
     finally:
@@ -197,6 +232,8 @@ async def _run_wheel1v1_series(bot, tid):
             await gm.broadcast(tid, g.to_dict())
             if series_over: return
             await asyncio.sleep(gm.WHEEL_1V1_NEXT_DELAY_S)
+    except asyncio.CancelledError:
+        raise
     except Exception as e:
         logging.exception("[WHEEL1V1-SERIES error] tid=%s: %s", tid, e)
     finally:
