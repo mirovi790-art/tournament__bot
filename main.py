@@ -17,9 +17,8 @@ from aiogram.types import (Message, CallbackQuery, InlineKeyboardMarkup,
 from dotenv import load_dotenv
 from sqlalchemy import select, func
 
-# ===== Safe monkey-patch для cb.answer (глотаем stale callbacks) =====
+# ===== Safe monkey-patch =====
 _original_cb_answer = CallbackQuery.answer
-
 async def _safe_cb_answer(self, text=None, show_alert=False, *args, **kwargs):
     try:
         return await _original_cb_answer(self, text, show_alert, *args, **kwargs)
@@ -32,16 +31,15 @@ async def _safe_cb_answer(self, text=None, show_alert=False, *args, **kwargs):
         return None
     except Exception as e:
         logging.warning("cb.answer: %s", e); return None
-
 CallbackQuery.answer = _safe_cb_answer
-# ====================================================================
+# =============================
 
 from database import (init_db, SessionLocal, User, Admin, Ban, Tournament,
                        Participant)
 from webapp import create_app
 import game as gm
 from game import (PokerGame, WheelGame, Wheel1v1Game, BracketGame,
-                  MAX_TABLE, BRACKET_SERIES_TARGET)
+                  MAX_TABLE, BRACKET_SERIES_TARGET, BOT_ID_BASE, is_bot)
 
 load_dotenv()
 
@@ -100,6 +98,7 @@ async def _safe_edit(cb: CallbackQuery, text: str, **kwargs):
 
 
 async def _is_admin(user_id):
+    if is_bot(user_id): return False
     if user_id == OWNER_ID: return True
     async with SessionLocal() as s:
         r = await s.execute(select(Admin).where(Admin.user_id == user_id))
@@ -107,6 +106,7 @@ async def _is_admin(user_id):
 
 
 async def _check_ban(user_id):
+    if is_bot(user_id): return False
     async with SessionLocal() as s:
         return await s.get(Ban, user_id) is not None
 
@@ -143,6 +143,9 @@ async def _enrich_names(bot, user_ids):
             u = await s.get(User, uid)
             if u and u.first_name and u.first_name.strip():
                 result[uid] = u.first_name.strip(); continue
+            # Для ботов не ходим в TG
+            if is_bot(uid):
+                result[uid] = _display_name(u, uid); continue
             try:
                 chat = await asyncio.wait_for(bot.get_chat(uid), timeout=3.0)
                 fn = (chat.first_name or "").strip(); un = (chat.username or "").strip()
@@ -172,6 +175,70 @@ async def _resolve_uid(raw: str):
         if not u:
             s.add(User(id=uid, first_name=f"Игрок {uid}")); await s.commit()
         return uid
+
+
+async def _new_bot_id():
+    """Генерирует новый уникальный ID для бота (>= BOT_ID_BASE)."""
+    async with SessionLocal() as s:
+        r = await s.execute(select(func.max(User.id)).where(User.id >= BOT_ID_BASE))
+        mx = r.scalar() or (BOT_ID_BASE - 1)
+        return int(mx) + 1
+
+
+async def _add_bot_to_tournament(tid):
+    """Создаёт новую запись User-бота и добавляет его в Participant'ы турнира.
+    Возвращает (ok, bot_name, error_msg)."""
+    async with SessionLocal() as s:
+        t = await s.get(Tournament, tid)
+        if not t: return False, None, "Турнир не найден"
+        # Считаем сколько ботов уже в турнире
+        r = await s.execute(select(Participant).where(
+            Participant.tournament_id == tid,
+            Participant.user_id >= BOT_ID_BASE))
+        existing_bots = r.scalars().all()
+        bot_number = len(existing_bots) + 1
+        # Проверка: не превышен ли лимит участников для bracket
+        if t.game_type == "bracket":
+            r = await s.execute(select(Participant).where(
+                Participant.tournament_id == tid,
+                Participant.status.in_(("approved", "winner", "pending"))))
+            total = len(r.scalars().all())
+            if total >= t.bracket_size:
+                return False, None, "Сетка уже заполнена"
+        # Проверка: для 1×1 — не больше 2 участников
+        if t.game_type in ("wheel_1v1",):
+            r = await s.execute(select(Participant).where(
+                Participant.tournament_id == tid,
+                Participant.status.in_(("approved", "winner", "pending"))))
+            total = len(r.scalars().all())
+            if total >= 2:
+                return False, None, "Уже 2 участника"
+        bot_id = await _new_bot_id()
+        bot_name = f"🤖 Бот {bot_number}"
+        s.add(User(id=bot_id, username=f"bot_{bot_id - BOT_ID_BASE}", first_name=bot_name))
+        s.add(Participant(tournament_id=tid, user_id=bot_id,
+                          status="approved", chips=t.start_stack))
+        await s.commit()
+    return True, bot_name, None
+
+
+async def _remove_last_bot_from_tournament(tid):
+    """Удаляет последнего добавленного бота из турнира. Возвращает (ok, name, error)."""
+    async with SessionLocal() as s:
+        r = await s.execute(select(Participant).where(
+            Participant.tournament_id == tid,
+            Participant.user_id >= BOT_ID_BASE).order_by(Participant.id.desc()).limit(1))
+        p = r.scalar_one_or_none()
+        if not p: return False, None, "В турнире нет ботов"
+        bot_id = p.user_id
+        u = await s.get(User, bot_id)
+        name = u.first_name if u else f"Бот {bot_id}"
+        # Удаляем участника
+        await s.delete(p)
+        # Удаляем юзера бота (он не нужен больше)
+        if u: await s.delete(u)
+        await s.commit()
+    return True, name, None
 
 
 def reply_main_menu(user_id, is_admin):
@@ -250,7 +317,6 @@ def confirm_kb():
 
 
 def cancel_text_kb():
-    """Reply-клавиатура с единственной кнопкой — используется на текстовых шагах."""
     return ReplyKeyboardMarkup(
         keyboard=[[KeyboardButton(text="❌ Отмена")]], resize_keyboard=True)
 
@@ -278,6 +344,11 @@ def manage_tournament_kb(tid, status, game_type=None, access_type="closed"):
                                   web_app=WebAppInfo(url=f"{WEBAPP_URL}/?tid={tid}"))]]
     if game_type in ("wheel", "wheel_1v1") and status == "running":
         rows.append([InlineKeyboardButton(text="🎡 Крутить колесо", callback_data=f"tt_spin_{tid}")])
+    # ===== Кнопки ботов =====
+    rows.append([
+        InlineKeyboardButton(text="🤖 Добавить бота", callback_data=f"tt_addbot_{tid}"),
+        InlineKeyboardButton(text="🗑 Убрать бота", callback_data=f"tt_delbot_{tid}"),
+    ])
     if status == "registration":
         can_join = (game_type != "wheel_1v1") and (game_type != "bracket" or access_type == "open")
         if can_join:
@@ -348,10 +419,12 @@ def _help_text():
             "<b>🏆 Турнир с сеткой:</b>\n"
             "▫️ 4/8/16/32 игрока в плей-офф.\n"
             "▫️ Серия побед настраивается (1/2/3).\n\n"
+            "<b>🤖 Боты:</b> в меню турнира есть «Добавить бота» — \n"
+            "для быстрого теста интерфейса.\n\n"
             "<blockquote>🎯 Команды: /start /menu /cancel /help</blockquote>")
 
 
-# ============ БАЗОВЫЕ КОМАНДЫ ============
+# ============ КОМАНДЫ ============
 @router.message(CommandStart())
 async def cmd_start(message: Message, state: FSMContext):
     await state.clear()
@@ -410,7 +483,6 @@ async def cmd_admin(message: Message, state: FSMContext):
     await message.answer(f"<b>🛠 АДМИН</b>\n{SEP}", reply_markup=owner_menu_kb())
 
 
-# ============ УНИВЕРСАЛЬНЫЙ CANCEL (текстом) ============
 @router.message(F.text == "❌ Отмена")
 async def txt_cancel_any(message: Message, state: FSMContext):
     cur = await state.get_state()
@@ -421,7 +493,7 @@ async def txt_cancel_any(message: Message, state: FSMContext):
                          reply_markup=reply_main_menu(message.from_user.id, is_adm))
 
 
-# ============ ГЛОБАЛЬНЫЕ МЕНЮ-КНОПКИ ============
+# ============ МЕНЮ-КНОПКИ ============
 @router.message(F.text == "🏆 Турниры")
 async def txt_tournaments(message: Message, state: FSMContext):
     await state.clear()
@@ -500,7 +572,7 @@ async def txt_open(message: Message, state: FSMContext):
     lines = [f"<b>🌐 Открытые турниры</b>\n{SEP}"]; rows = []
     for t in tours:
         emoji = {"poker": "🃏", "bracket": "🏆"}.get(t.game_type, "🎡")
-        extra = f" · {t.bracket_size} игр. · до {getattr(t, 'series_target', 3)} поб." if t.game_type == "bracket" else ""
+        extra = f" · {t.bracket_size} игр." if t.game_type == "bracket" else ""
         lines.append(f"{emoji} <b>{esc(t.name)}</b> · <i>{esc(t.prize or '—')}</i>{extra}")
         rows.append([InlineKeyboardButton(text=f"📩 Заявка · {t.name[:20]}",
                                           callback_data=f"apply_{t.id}")])
@@ -749,7 +821,7 @@ async def cb_cancel(cb: CallbackQuery, state: FSMContext):
     await cb.answer()
 
 
-# ============ FIND PLAYER FSM ============
+# ============ FIND PLAYER ============
 @router.message(FindPlayerFSM.query, ~F.text.in_(MENU_BUTTONS))
 async def msg_find_player(message: Message, state: FSMContext):
     if message.from_user.id != OWNER_ID: return
@@ -817,8 +889,7 @@ async def txt_create(message: Message, state: FSMContext):
     if active_count >= MAX_ACTIVE_TOURNAMENTS_PER_ADMIN:
         await message.answer(
             f"<blockquote>⛔ У тебя уже <b>{active_count}</b> активных турниров "
-            f"(максимум {MAX_ACTIVE_TOURNAMENTS_PER_ADMIN}).<br><br>"
-            "Заверши или удали один, прежде чем создавать новый.</blockquote>")
+            f"(максимум {MAX_ACTIVE_TOURNAMENTS_PER_ADMIN}).</blockquote>")
         return
     await state.set_state(TournamentFSM.access_type)
     await message.answer(
@@ -1093,8 +1164,7 @@ async def _build_confirm_text(state: FSMContext) -> str:
             u2 = await s.get(User, data["w1v1_p2_id"])
         lines += [f"🔹 Игрок 1: <code>{esc(_display_name(u1, data['w1v1_p1_id']))}</code>",
                   f"🔹 Игрок 2: <code>{esc(_display_name(u2, data['w1v1_p2_id']))}</code>",
-                  f"🔹 Серия: <b>до {data.get('w1v1_series', 1)} побед</b>",
-                  "\n<blockquote>Оба получат приглашение.</blockquote>"]
+                  f"🔹 Серия: <b>до {data.get('w1v1_series', 1)} побед</b>"]
     elif data["game_type"] == "bracket":
         size = data.get("bracket_size", 4)
         series = data.get("bracket_series", 3)
@@ -1158,6 +1228,7 @@ async def tt_confirm(cb: CallbackQuery, state: FSMContext):
             await s.commit()
         await state.clear(); await cb.answer(f"⚔️ Приглашения (до {series} побед)")
         for uid in (p1, p2):
+            if is_bot(uid): continue
             try:
                 await cb.bot.send_message(uid,
                     f"<b>⚔️ Колесо 1×1 — вызов!</b>\n{SEP}\n"
@@ -1196,6 +1267,7 @@ async def tt_confirm(cb: CallbackQuery, state: FSMContext):
         if access == "closed":
             await cb.answer(f"🏆 Приглашения ({size}, до {series})")
             for uid in players:
+                if is_bot(uid): continue
                 try:
                     await cb.bot.send_message(uid,
                         f"<b>🏆 Турнир с сеткой — приглашение!</b>\n{SEP}\n"
@@ -1220,8 +1292,7 @@ async def tt_confirm(cb: CallbackQuery, state: FSMContext):
                        start_stack=data.get("poker_stack", 1000),
                        turn_time=data.get("poker_turn", 20),
                        blind_interval=data.get("poker_blind", 5),
-                       series_target=3,
-                       prize=data.get("prize"))
+                       series_target=3, prize=data.get("prize"))
         s.add(t); await s.commit(); await s.refresh(t); tid = t.id
     await state.clear(); await cb.answer("Создан!")
     try:
@@ -1239,6 +1310,7 @@ async def _show_tournament_menu(cb: CallbackQuery, tid: int):
         parts = r.scalars().all()
     approved = [p for p in parts if p.status in ("approved", "winner")]
     pending_count = len([p for p in parts if p.status == "pending"])
+    bot_count = len([p for p in parts if is_bot(p.user_id)])
     gt = {"poker": "🃏 Покер", "wheel": "🎡 Колесо", "wheel_1v1": "⚔️ Колесо 1×1",
           "bracket": "🏆 Турнир с сеткой"}.get(t.game_type, "?")
     status_label = t.status
@@ -1257,6 +1329,8 @@ async def _show_tournament_menu(cb: CallbackQuery, tid: int):
             f"<b>Участников:</b> <code>{len(approved)}{total_label}</code>")
     if t.game_type in ("bracket", "wheel_1v1"):
         text += f"\n<b>Формат боя:</b> до <code>{getattr(t, 'series_target', 1)}</code> побед"
+    if bot_count > 0:
+        text += f"\n<b>🤖 Ботов:</b> <code>{bot_count}</code>"
     if pending_count > 0:
         text += f"\n<b>⏳ Ожидают подтверждения:</b> <code>{pending_count}</code>"
     text += f"\n<b>🎁 Приз:</b> <i>{esc(t.prize or '—')}</i>"
@@ -1286,6 +1360,32 @@ async def _show_player_tournament_menu(cb: CallbackQuery, tid: int):
         except Exception: pass
 
 
+# ============ БОТЫ: КНОПКИ ============
+@router.callback_query(F.data.startswith("tt_addbot_"))
+async def cb_addbot(cb: CallbackQuery):
+    if not await _is_admin(cb.from_user.id):
+        await cb.answer("Нет доступа", show_alert=True); return
+    tid = int(cb.data.split("_")[-1])
+    ok, name, err = await _add_bot_to_tournament(tid)
+    if not ok:
+        await cb.answer(err or "Ошибка", show_alert=True); return
+    await cb.answer(f"🤖 {name} добавлен", show_alert=True)
+    await _show_tournament_menu(cb, tid)
+
+
+@router.callback_query(F.data.startswith("tt_delbot_"))
+async def cb_delbot(cb: CallbackQuery):
+    if not await _is_admin(cb.from_user.id):
+        await cb.answer("Нет доступа", show_alert=True); return
+    tid = int(cb.data.split("_")[-1])
+    ok, name, err = await _remove_last_bot_from_tournament(tid)
+    if not ok:
+        await cb.answer(err or "Ошибка", show_alert=True); return
+    await cb.answer(f"🗑 {name} удалён", show_alert=True)
+    await _show_tournament_menu(cb, tid)
+
+
+# ============ УПРАВЛЕНИЕ ТУРНИРОМ ============
 @router.callback_query(F.data == "admin_manage_tournaments")
 async def cb_manage(cb: CallbackQuery):
     if not await _is_admin(cb.from_user.id): await cb.answer("Нет", show_alert=True); return
@@ -1331,12 +1431,8 @@ async def cb_spin_wheel(cb: CallbackQuery):
         t = await s.get(Tournament, tid)
         if not t: await cb.answer("Нет", show_alert=True); return
         gtype = t.game_type
-
     if gtype == "wheel_1v1":
-        await cb.answer("Серия стартует автоматически после готовности обоих игроков",
-                        show_alert=True)
-        return
-
+        await cb.answer("Серия стартует автоматически", show_alert=True); return
     g = gm.get_wheel(tid)
     if not g: await cb.answer("Колесо не активно", show_alert=True); return
     if g.finished: await cb.answer("Завершён", show_alert=True); return
@@ -1497,6 +1593,7 @@ async def _start_tournament(bot, tid, notify=False):
         gm.set_wheel(tid, g); await gm.broadcast(tid, g.to_dict())
     if notify:
         for p in parts:
+            if is_bot(p.user_id): continue
             try:
                 await bot.send_message(p.user_id,
                     f"<b>🚀 Турнир начался!</b>\n{SEP}\n"
@@ -1529,6 +1626,7 @@ async def _auto_start_bracket(bot, tid):
         if tt: tt.status = "running"; await s.commit()
     await gm.broadcast(tid, g.to_dict())
     for p in players:
+        if is_bot(p["user_id"]): continue
         try:
             await bot.send_message(p["user_id"],
                 f"<b>🏆 Турнир с сеткой стартовал!</b>\n{SEP}\n"
@@ -1628,10 +1726,8 @@ async def _do_kick_player(bot, tid, t, uid, participant_row):
     async with SessionLocal() as s:
         p = await s.get(Participant, participant_row.id) if participant_row else None
         if p: p.status = "kicked"; await s.commit()
-
     tgame = t.game_type
     tname = t.name
-
     if tgame == "poker":
         g = gm.get_poker(tid)
         if g:
@@ -1662,6 +1758,7 @@ async def _do_kick_player(bot, tid, t, uid, participant_row):
             for adv in advanced_list:
                 if adv["user_id"] in seen: continue
                 seen.add(adv["user_id"])
+                if is_bot(adv["user_id"]): continue
                 try:
                     await bot.send_message(adv["user_id"],
                         f"<b>🏆 Соперник выбыл</b>\n{SEP}\n"
@@ -1670,11 +1767,11 @@ async def _do_kick_player(bot, tid, t, uid, participant_row):
                 except Exception as e:
                     logging.warning("auto-advance notify fail: %s", e)
             await gm.broadcast(tid, g.to_dict())
-
-    try:
-        await bot.send_message(uid,
-            f"<b>🚫 Вас исключили</b>\n{SEP}\n🏆 <code>{esc(tname)}</code>")
-    except: pass
+    if not is_bot(uid):
+        try:
+            await bot.send_message(uid,
+                f"<b>🚫 Вас исключили</b>\n{SEP}\n🏆 <code>{esc(tname)}</code>")
+        except: pass
 
 
 @router.callback_query(F.data == "my_tournaments")
@@ -1767,11 +1864,12 @@ async def cb_approve(cb: CallbackQuery):
         await s.commit()
         tname = t.name if t else "?"; uid = p.user_id; tid = p.tournament_id
         gtype = t.game_type if t else None
-    try:
-        await cb.bot.send_message(uid,
-            f"<b>✅ Одобрено!</b>\n{SEP}\n🏆 <code>{esc(tname)}</code>\n\n"
-            "<blockquote>Жди старт.</blockquote>")
-    except: pass
+    if not is_bot(uid):
+        try:
+            await cb.bot.send_message(uid,
+                f"<b>✅ Одобрено!</b>\n{SEP}\n🏆 <code>{esc(tname)}</code>\n\n"
+                "<blockquote>Жди старт.</blockquote>")
+        except: pass
     await _safe_edit(cb, f"<b>✅ Принят</b>"); await cb.answer("Принято")
     if gtype == "bracket":
         try: await _auto_start_bracket(cb.bot, tid)
@@ -1786,9 +1884,10 @@ async def cb_reject(cb: CallbackQuery):
         if not p: await cb.answer("Нет", show_alert=True); return
         p.status = "rejected"; t = await s.get(Tournament, p.tournament_id); await s.commit()
         tname = t.name if t else "?"; uid = p.user_id
-    try:
-        await cb.bot.send_message(uid, f"<b>❌ Отклонена</b>\n🏆 <code>{esc(tname)}</code>")
-    except: pass
+    if not is_bot(uid):
+        try:
+            await cb.bot.send_message(uid, f"<b>❌ Отклонена</b>\n🏆 <code>{esc(tname)}</code>")
+        except: pass
     await _safe_edit(cb, f"<b>❌ Отклонён</b>"); await cb.answer("Отклонено")
 
 
@@ -1798,7 +1897,6 @@ async def cb_accept_inv(cb: CallbackQuery):
     start_1v1 = False; players_1v1 = []
     tname = ""; tprize = ""
     series_target = 1
-    is_bracket = False
     async with SessionLocal() as s:
         t = await s.get(Tournament, tid)
         if not t:
@@ -1830,17 +1928,10 @@ async def cb_accept_inv(cb: CallbackQuery):
                     uu = await s.get(User, pp.user_id)
                     players_1v1.append({"user_id": pp.user_id, "name": _display_name(uu, pp.user_id)})
                 t.status = "running"; await s.commit()
-        elif t.game_type == "bracket":
-            is_bracket = True
     try:
-        if is_bracket:
-            await _safe_edit(cb,
-                f"<b>✅ Принято!</b>\n{SEP}\n🏆 <code>{esc(tname)}</code>\n\n"
-                "<blockquote>Ждём остальных участников…</blockquote>")
-        else:
-            await _safe_edit(cb,
-                f"<b>✅ Принято!</b>\n{SEP}\n🏆 <code>{esc(tname)}</code>\n\n"
-                "<blockquote>Ждём второго игрока...</blockquote>")
+        await _safe_edit(cb,
+            f"<b>✅ Принято!</b>\n{SEP}\n🏆 <code>{esc(tname)}</code>\n\n"
+            "<blockquote>Ждём остальных…</blockquote>")
     except: pass
     await cb.answer("Принято!")
     if start_1v1 and len(players_1v1) == 2:
@@ -1849,6 +1940,7 @@ async def cb_accept_inv(cb: CallbackQuery):
         gm.set_wheel_1v1(tid, g)
         await gm.broadcast(tid, {"type": "wheel_1v1_ready"})
         for pl in players_1v1:
+            if is_bot(pl["user_id"]): continue
             try:
                 await cb.bot.send_message(pl["user_id"],
                     f"<b>⚔️ Оба приняли вызов!</b>\n{SEP}\n"
@@ -1857,8 +1949,6 @@ async def cb_accept_inv(cb: CallbackQuery):
                     "<blockquote>Зайди в Mini App → «Готов».</blockquote>",
                     reply_markup=enter_webapp_kb(tid, WEBAPP_URL))
             except: pass
-    if is_bracket:
-        await _auto_start_bracket(cb.bot, tid)
 
 
 @router.callback_query(F.data.startswith("decline_invite_"))
@@ -1885,13 +1975,14 @@ async def cb_decline_inv(cb: CallbackQuery):
         async with SessionLocal() as s:
             r = await s.execute(select(Participant).where(Participant.tournament_id == tid))
             for pp in r.scalars().all():
-                if pp.user_id != cb.from_user.id:
-                    try:
-                        await cb.bot.send_message(pp.user_id,
-                            f"<b>❌ Турнир отменён</b>\n{SEP}\n"
-                            f"🏆 <code>{esc(tname)}</code>\n\n"
-                            "<blockquote>Игрок отклонил приглашение.</blockquote>")
-                    except: pass
+                if pp.user_id == cb.from_user.id: continue
+                if is_bot(pp.user_id): continue
+                try:
+                    await cb.bot.send_message(pp.user_id,
+                        f"<b>❌ Турнир отменён</b>\n{SEP}\n"
+                        f"🏆 <code>{esc(tname)}</code>\n\n"
+                        "<blockquote>Игрок отклонил приглашение.</blockquote>")
+                except: pass
         await gm.broadcast(tid, {"type": "tournament_cancelled", "tid": tid})
 
 
@@ -1900,7 +1991,7 @@ async def _notify_creator_and_users(bot, tname, tprize, winner_id, winner_name, 
                                      manual, user_ids, total, creator_id):
     try:
         await asyncio.sleep(7)
-        if creator_id:
+        if creator_id and not is_bot(creator_id):
             try:
                 if manual:
                     ct = (f"<b>🏁 Турнир завершён</b>\n{SEP}\n"
@@ -1922,6 +2013,7 @@ async def _notify_creator_and_users(bot, tname, tprize, winner_id, winner_name, 
             except Exception as e:
                 logging.warning("creator notify fail: %s", e)
         for uid in user_ids:
+            if is_bot(uid): continue
             try:
                 if manual:
                     text = (f"<b>🏁 ТУРНИР ЗАВЕРШЁН</b>\n{SEP}\n"
@@ -1959,10 +2051,12 @@ async def _finalize_tournament(bot, tid, winner_id=None, winner_name=None, manua
         winner_uname = None
         if not manual and winner_id:
             u = await s.get(User, winner_id)
-            if u:
+            if u and not is_bot(winner_id):
                 u.wins = (u.wins or 0) + 1
                 winner_name = winner_name or u.first_name or str(winner_id)
                 winner_uname = u.username
+            elif is_bot(winner_id):
+                winner_name = winner_name or f"🤖 {winner_id}"
             r = await s.execute(select(Participant).where(
                 Participant.tournament_id == tid, Participant.user_id == winner_id))
             p = r.scalar_one_or_none()
@@ -2060,7 +2154,6 @@ async def _periodic_cleanup():
             logging.exception("cleanup error: %s", e)
 
 
-# ============ FALLBACK ============
 @router.message()
 async def fallback_handler(message: Message, state: FSMContext):
     cur = await state.get_state()
@@ -2076,7 +2169,6 @@ async def fallback_handler(message: Message, state: FSMContext):
             "<blockquote>Команды: /start /menu /help /cancel</blockquote>")
 
 
-# ============ MAIN ============
 async def main():
     if not BOT_TOKEN: raise SystemExit("❌ BOT_TOKEN не задан")
     await init_db()
