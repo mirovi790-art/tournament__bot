@@ -11,7 +11,6 @@ WHEEL_1V1_SPIN_DURATION_MS = 8000
 WHEEL_1V1_NEXT_DELAY_S = 2.5
 WHEEL_GENERAL_SPIN_DURATION_MS = 8000
 
-# ============ БОТЫ ============
 BOT_ID_BASE = 9_000_000_000
 
 
@@ -26,7 +25,6 @@ def _rand_offset_ratio():
     return random.uniform(-0.4, 0.4)
 
 
-# ============ КОЛЕСО (общее) ============
 class WheelGame:
     def __init__(self, tid, participants, prize):
         self.tid = tid
@@ -59,7 +57,6 @@ class WheelGame:
                 "last_spin": self.last_spin, "server_now": int(time.time() * 1000)}
 
 
-# ============ КОЛЕСО 1×1 ============
 class Wheel1v1Game:
     def __init__(self, tid, p1, p2, prize, series_target=1):
         self.tid = tid
@@ -74,7 +71,6 @@ class Wheel1v1Game:
         self.winner = None
         self.last_spin = None
         self.pending_winner_idx = None
-        # Авто-готовность ботов
         for p in self.players:
             if is_bot(p.get("user_id")):
                 self.ready.add(p["user_id"])
@@ -131,7 +127,6 @@ class Wheel1v1Game:
                 "last_spin": self.last_spin, "server_now": int(time.time() * 1000)}
 
 
-# ============ BRACKET ============
 class BracketMatch:
     def __init__(self, match_id, round_num, pos_in_round, series_target=3):
         self.match_id = match_id
@@ -171,7 +166,7 @@ class BracketGame:
         self.finished = False
         self.winner = None
         self._next_match_id = 0
-        self.rounds: list[list[BracketMatch]] = []
+        self.rounds = []
 
         shuffled = list(players)
         random.shuffle(shuffled)
@@ -385,11 +380,10 @@ class BracketGame:
         }
 
 
-# ============ ХРАНИЛИЩА ============
-_active_wheel: dict[int, WheelGame] = {}
-_active_wheel_1v1: dict[int, Wheel1v1Game] = {}
-_active_bracket: dict[int, BracketGame] = {}
-_connections: dict[int, set] = {}
+_active_wheel = {}
+_active_wheel_1v1 = {}
+_active_bracket = {}
+_connections = {}
 
 
 def get_wheel(tid): return _active_wheel.get(tid)
