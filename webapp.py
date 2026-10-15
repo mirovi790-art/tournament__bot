@@ -20,7 +20,7 @@ OWNER_ID = int(os.getenv("OWNER_ID", "0") or "0")
 HERE = os.path.dirname(os.path.abspath(__file__))
 
 _bracket_spin_tasks: dict[int, asyncio.Task] = {}
-_castle_tasks: dict[int, asyncio.Task] = {}
+_wheel1v1_spin_tasks: dict[int, asyncio.Task] = {}
 
 
 def _esc(s): return html.escape(s or "")
@@ -100,18 +100,14 @@ async def _waiting_state(bot, tid, t, user_id):
                 "total_rounds": 0, "prize": t.prize or "🏆 Приз",
                 "finished": False, "winner": None, "rounds": [],
                 "waiting": True, "server_now": int(time.time() * 1000)}
-    if t.game_type == "castle_bracket":
-        return {"type": "castle_bracket_state", "tid": tid, "size": t.bracket_size,
-                "total_rounds": 0, "prize": t.prize or "🏰 Приз",
-                "finished": False, "winner": None, "rounds": [],
-                "waiting": True, "server_now": int(time.time() * 1000)}
-    if t.game_type == "castle_1v1":
-        return {"type": "castle_match_state", "tid": tid, "prize": t.prize or "🏰 Приз",
-                "match_id": 0, "series_target": int(getattr(t, "series_target", 3) or 3),
-                "p1": None, "p2": None, "p1_wins": 0, "p2_wins": 0,
-                "p1_ready": False, "p2_ready": False, "round_number": 0,
-                "last_round": None, "finished": False, "winner": None, "loser": None,
-                "p1_troops": None, "p2_troops": None, "waiting": True,
+    if t.game_type == "wheel_1v1":
+        return {"type": "wheel_1v1_state", "tid": tid,
+                "players": [], "ready": [], "spin_count": 0,
+                "finished": False, "winner": None,
+                "prize": t.prize or "🏆 Приз", "last_spin": None,
+                "series_target": int(getattr(t, "series_target", 1) or 1),
+                "p1_wins": 0, "p2_wins": 0, "pending_winner_idx": None,
+                "waiting": True,
                 "server_now": int(time.time() * 1000)}
     return {"type": "wheel_state", "tid": tid, "active": players_info,
             "eliminated": [], "spin_count": 0, "finished": False,
@@ -148,27 +144,60 @@ async def _notify_auto_advanced(bot, tid, player):
         logging.warning("auto-advance notify fail: %s", e)
 
 
+# ============================================================
+# BRACKET: автоматическая серия спинов (серия до series_target)
+# ============================================================
 async def _run_bracket_series(bot, tid, match_id):
+    """
+    Крутит раунды серии в матче сетки до победы одной из сторон.
+    Двухфазная логика: spin_match (визуально) -> пауза -> finalize_spin (счёт).
+    Защищено от преждевременного выхода и исключений.
+    """
+    logging.info("[BRACKET-SERIES start] tid=%s match=%s", tid, match_id)
     try:
         await asyncio.sleep(1.5)
+        round_num = 0
         while True:
             g = gm.get_bracket(tid)
-            if not g: return
+            if not g:
+                logging.warning("[BRACKET-SERIES abort] no game tid=%s", tid)
+                return
             m = g.find_match(match_id)
-            if not m or m.finished: return
-            if len(m.room_ready) < 2: return
+            if not m:
+                logging.warning("[BRACKET-SERIES abort] no match tid=%s mid=%s", tid, match_id)
+                return
+            if m.finished:
+                logging.info("[BRACKET-SERIES done] match finished tid=%s mid=%s", tid, match_id)
+                return
+            if len(m.room_ready) < 2:
+                logging.warning("[BRACKET-SERIES abort] not enough ready tid=%s mid=%s",
+                                tid, match_id)
+                return
 
+            round_num += 1
+            # Фаза 1: визуальный спин
             if not g.spin_match(match_id):
+                logging.warning("[BRACKET-SERIES abort] spin_match returned None tid=%s mid=%s",
+                                tid, match_id)
                 return
             await gm.broadcast(tid, g.to_dict())
 
+            # Ждём окончания анимации
             await asyncio.sleep(gm.BRACKET_SPIN_DURATION_MS / 1000.0 + 0.5)
 
+            # Фаза 2: финализация счёта
             g = gm.get_bracket(tid)
-            if not g: return
+            if not g:
+                logging.warning("[BRACKET-SERIES abort] game gone tid=%s", tid)
+                return
             m2, advanced_list = g.finalize_spin(match_id)
-            if not m2: return
+            if not m2:
+                logging.warning("[BRACKET-SERIES abort] finalize returned None tid=%s mid=%s",
+                                tid, match_id)
+                return
             await gm.broadcast(tid, g.to_dict())
+            logging.info("[BRACKET-SERIES round %s] tid=%s mid=%s p1=%s p2=%s finished=%s",
+                         round_num, tid, match_id, m2.p1_wins, m2.p2_wins, m2.finished)
 
             if m2.finished:
                 if m2.loser:
@@ -177,57 +206,65 @@ async def _run_bracket_series(bot, tid, match_id):
                     asyncio.create_task(_notify_auto_advanced(bot, tid, adv))
                 return
 
+            # Пауза перед следующей серией
             await asyncio.sleep(gm.BRACKET_NEXT_DELAY_S)
     except Exception as e:
-        logging.exception("run_bracket_series error: %s", e)
+        logging.exception("[BRACKET-SERIES error] tid=%s mid=%s: %s", tid, match_id, e)
     finally:
         _bracket_spin_tasks.pop(match_id, None)
 
 
-async def _run_castle_bracket_series(bot, tid, match_id):
+# ============================================================
+# WHEEL 1×1: автоматическая серия спинов (серия до series_target)
+# ============================================================
+async def _run_wheel1v1_series(bot, tid):
     """
-    Крутит раунды замков в матче сетки автоматически, пока оба не сдадут войска.
-    Когда оба сдали — резолвит раунд, показывает результат, пауза, следующий раунд.
-    Завершается, когда матч финализирован (кто-то набрал series_target).
+    Крутит серию в дуэли 1×1 колеса до победы одной из сторон.
     """
+    logging.info("[WHEEL1V1-SERIES start] tid=%s", tid)
     try:
+        await asyncio.sleep(1.5)
+        round_num = 0
         while True:
-            g = gm.get_castle_bracket(tid)
-            if not g: return
-            m = g.find_match(match_id)
-            if not m or m.finished: return
-            if len(m.room_ready) < 2: return
-            # ждём пока оба положат войска
-            while True:
-                g = gm.get_castle_bracket(tid)
-                if not g: return
-                m = g.find_match(match_id)
-                if not m or m.finished: return
-                if m.both_ready(): break
-                await asyncio.sleep(0.5)
-            result, series_over = m.resolve_round()
-            if not result: return
-            await gm.broadcast(tid, g.to_dict())
-            # пауза, чтобы показать расклад
-            await asyncio.sleep(gm.CASTLE_REVEAL_DURATION_MS / 1000.0)
-            if series_over:
-                if m.p1_wins > m.p2_wins:
-                    m.winner = m.p1; m.loser = m.p2
-                else:
-                    m.winner = m.p2; m.loser = m.p1
-                m.finished = True
-                advanced_list = g._advance_winner(m)
-                await gm.broadcast(tid, g.to_dict())
-                if m.loser:
-                    asyncio.create_task(_notify_loser_delayed(bot, tid, m.loser, 1.0))
-                for adv in advanced_list or []:
-                    asyncio.create_task(_notify_auto_advanced(bot, tid, adv))
+            g = gm.get_wheel_1v1(tid)
+            if not g:
+                logging.warning("[WHEEL1V1-SERIES abort] no game tid=%s", tid)
                 return
-            await asyncio.sleep(gm.CASTLE_NEXT_DELAY_S)
+            if g.finished:
+                logging.info("[WHEEL1V1-SERIES done] finished tid=%s", tid)
+                return
+            if not g.both_ready():
+                logging.warning("[WHEEL1V1-SERIES abort] not both ready tid=%s", tid)
+                return
+
+            round_num += 1
+            winner = g.spin()
+            if winner is None:
+                logging.warning("[WHEEL1V1-SERIES abort] spin returned None tid=%s", tid)
+                return
+            await gm.broadcast(tid, g.to_dict())
+
+            await asyncio.sleep(gm.WHEEL_1V1_SPIN_DURATION_MS / 1000.0 + 0.5)
+
+            g = gm.get_wheel_1v1(tid)
+            if not g:
+                return
+            result = g.finalize_spin()
+            if not result:
+                return
+            series_over, _ = result
+            await gm.broadcast(tid, g.to_dict())
+            logging.info("[WHEEL1V1-SERIES round %s] tid=%s p1=%s p2=%s finished=%s",
+                         round_num, tid, g.p1_wins, g.p2_wins, g.finished)
+
+            if series_over:
+                return
+
+            await asyncio.sleep(gm.WHEEL_1V1_NEXT_DELAY_S)
     except Exception as e:
-        logging.exception("run_castle_bracket_series error: %s", e)
+        logging.exception("[WHEEL1V1-SERIES error] tid=%s: %s", tid, e)
     finally:
-        _castle_tasks.pop(match_id, None)
+        _wheel1v1_spin_tasks.pop(tid, None)
 
 
 def create_app(bot):
@@ -278,10 +315,10 @@ def create_app(bot):
                 t = await s.get(Tournament, p.tournament_id)
                 if not t or t.id in seen_tids: continue
                 if t.status in ("finished", "cancelled"): continue
-                if p.status in ("kicked", "left") and t.game_type not in ("bracket", "castle_bracket"):
+                if p.status in ("kicked", "left") and t.game_type != "bracket":
                     continue
                 seen_tids.add(t.id)
-                status_to_show = p.status if t.game_type in ("wheel_1v1", "bracket", "castle_bracket", "castle_1v1") else t.status
+                status_to_show = p.status if t.game_type in ("wheel_1v1", "bracket") else t.status
                 my_tours.append({"tid": t.id, "name": t.name, "status": t.status,
                                  "display_status": status_to_show,
                                  "game_type": t.game_type, "my_status": p.status,
@@ -300,8 +337,7 @@ def create_app(bot):
 
             if is_admin:
                 r = await s.execute(select(Tournament).where(
-                    Tournament.game_type.in_(("wheel", "wheel_1v1", "bracket",
-                                              "castle_1v1", "castle_bracket")),
+                    Tournament.game_type.in_(("wheel", "wheel_1v1", "bracket")),
                     Tournament.status.in_(("running", "paused"))))
                 for t in r.scalars().all():
                     if t.id in seen_tids: continue
@@ -337,7 +373,7 @@ def create_app(bot):
             is_excluded = p is not None and p.status in ("kicked", "left")
             if not is_participant and not is_admin and not is_pending and not is_excluded:
                 raise HTTPException(status_code=403, detail="Not a participant")
-            if is_excluded and t.game_type not in ("bracket", "castle_bracket"):
+            if is_excluded and t.game_type != "bracket":
                 raise HTTPException(status_code=403, detail="Not a participant")
             my_status = p.status if p else "creator"
         return {"id": t.id, "name": t.name, "game_type": t.game_type,
@@ -379,7 +415,7 @@ def create_app(bot):
                 Admin.user_id == user_id))).scalar_one_or_none() is not None)
             is_participant = p is not None and p.status in ("approved", "winner")
             is_excluded = p is not None and p.status in ("kicked", "left")
-        allowed = is_admin or is_participant or (is_excluded and t.game_type in ("bracket", "castle_bracket"))
+        allowed = is_admin or is_participant or (is_excluded and t.game_type == "bracket")
         if not allowed:
             await websocket.close(code=4003); return
         await websocket.accept()
@@ -391,21 +427,9 @@ def create_app(bot):
         elif t.game_type == "wheel_1v1":
             g = gm.get_wheel_1v1(tid)
             if g: state = g.to_dict()
-            else:
-                state = {"type": "wheel_1v1_state", "tid": tid,
-                         "players": [], "ready": [], "spin_count": 0,
-                         "finished": False, "winner": None,
-                         "prize": t.prize or "🏆 Приз", "last_spin": None,
-                         "waiting": True,
-                         "server_now": int(time.time() * 1000)}
+            else: state = await _waiting_state(bot, tid, t, user_id)
         elif t.game_type == "bracket":
             g = gm.get_bracket(tid)
-            if g: state = g.to_dict()
-        elif t.game_type == "castle_1v1":
-            g = gm.get_castle_1v1(tid)
-            if g: state = g.to_dict(for_user_id=user_id)
-        elif t.game_type == "castle_bracket":
-            g = gm.get_castle_bracket(tid)
             if g: state = g.to_dict()
         else:
             g = gm.get_wheel(tid)
@@ -454,19 +478,7 @@ async def _handle(bot, ws, tid, user_id, msg, t, is_admin):
     elif t.game_type == "wheel_1v1":
         g = gm.get_wheel_1v1(tid)
         if not g: return
-        if mtype == "spin":
-            if not is_admin:
-                try: await ws.send_json({"type": "spin_denied"})
-                except: pass
-                return
-            if not g.both_ready():
-                try: await ws.send_json({"type": "not_ready"})
-                except: pass
-                return
-            if not g.finished:
-                g.spin()
-                await gm.broadcast(tid, g.to_dict())
-        elif mtype == "request_state":
+        if mtype == "request_state":
             await ws.send_json(g.to_dict())
     elif t.game_type == "bracket":
         g = gm.get_bracket(tid)
@@ -494,55 +506,6 @@ async def _handle(bot, ws, tid, user_id, msg, t, is_admin):
                     _bracket_spin_tasks[match_id] = task
         elif mtype == "request_state":
             await ws.send_json(g.to_dict())
-    elif t.game_type == "castle_1v1":
-        g = gm.get_castle_1v1(tid)
-        if not g: return
-        if mtype == "castle_set":
-            troops = msg.get("troops") or []
-            if g.set_troops(user_id, troops):
-                await gm.broadcast(tid, g.to_dict())
-        elif mtype == "castle_unset":
-            if g.unset_troops(user_id):
-                await gm.broadcast(tid, g.to_dict())
-        elif mtype == "castle_resolve":
-            if is_admin and g.both_ready():
-                g.resolve_round()
-                await gm.broadcast(tid, g.to_dict())
-        elif mtype == "request_state":
-            await ws.send_json(g.to_dict(for_user_id=user_id))
-    elif t.game_type == "castle_bracket":
-        g = gm.get_castle_bracket(tid)
-        if not g: return
-        if mtype == "castle_bracket_enter":
-            match_id = int(msg.get("match_id", 0))
-            if g.enter_match(match_id, user_id, force=is_admin):
-                await gm.broadcast(tid, g.to_dict())
-                try: await ws.send_json(g.to_dict())
-                except: pass
-        elif mtype == "castle_bracket_ready":
-            match_id = int(msg.get("match_id", 0))
-            if g.press_ready(match_id, user_id):
-                await gm.broadcast(tid, g.to_dict())
-        elif mtype == "castle_bracket_room_ready":
-            match_id = int(msg.get("match_id", 0))
-            if g.press_room_ready(match_id, user_id):
-                await gm.broadcast(tid, g.to_dict())
-                m = g.find_match(match_id)
-                if m and len(m.room_ready) >= 2 and not _castle_tasks.get(match_id):
-                    task = asyncio.create_task(_run_castle_bracket_series(bot, tid, match_id))
-                    _castle_tasks[match_id] = task
-        elif mtype == "castle_bracket_set":
-            match_id = int(msg.get("match_id", 0))
-            m = g.find_match(match_id)
-            if m and m.set_troops(user_id, msg.get("troops") or []):
-                await gm.broadcast(tid, g.to_dict())
-        elif mtype == "castle_bracket_unset":
-            match_id = int(msg.get("match_id", 0))
-            m = g.find_match(match_id)
-            if m and m.unset_troops(user_id):
-                await gm.broadcast(tid, g.to_dict())
-        elif mtype == "request_state":
-            await ws.send_json(g.to_dict())
     else:
         g = gm.get_wheel(tid)
         if not g: return
@@ -557,24 +520,20 @@ async def _handle(bot, ws, tid, user_id, msg, t, is_admin):
 
 
 async def _handle_1v1_ready(bot, tid, user_id):
+    """При получении ready от игрока — если оба готовы, запускаем серию."""
     g = gm.get_wheel_1v1(tid)
     if not g or g.finished: return
     if user_id not in g.user_ids(): return
     if g.press_ready(user_id):
         await gm.broadcast(tid, g.to_dict())
-        if g.both_ready():
-            async def _auto_spin():
-                await asyncio.sleep(1.5)
-                if g.finished: return
-                g.spin()
-                await gm.broadcast(tid, g.to_dict())
-            asyncio.create_task(_auto_spin())
+        if g.both_ready() and not _wheel1v1_spin_tasks.get(tid):
+            task = asyncio.create_task(_run_wheel1v1_series(bot, tid))
+            _wheel1v1_spin_tasks[tid] = task
 
 
 async def _admin_end(bot, tid):
     from main import _finalize_tournament, _finalized_tids
-    for d in (gm._active_poker, gm._active_wheel, gm._active_wheel_1v1,
-              gm._active_bracket, gm._active_castle_1v1, gm._active_castle_bracket):
+    for d in (gm._active_poker, gm._active_wheel, gm._active_wheel_1v1, gm._active_bracket):
         d.pop(tid, None)
     _finalized_tids.discard(tid)
     try: await _finalize_tournament(bot, tid, manual=True)
@@ -611,8 +570,8 @@ async def _admin_kick(bot, tid, t, target_uid):
             if len(g.active) == 1 and not g.finished:
                 g.winner = g.active[0]; g.winner["place"] = 1; g.finished = True
             await gm.broadcast(tid, g.to_dict())
-    elif t.game_type in ("bracket", "castle_bracket"):
-        g = gm.get_bracket(tid) if t.game_type == "bracket" else gm.get_castle_bracket(tid)
+    elif t.game_type == "bracket":
+        g = gm.get_bracket(tid)
         if g:
             advanced_list = g.remove_player(target_uid)
             seen = set()
@@ -660,8 +619,8 @@ async def _handle_leave(bot, ws, tid, user_id, t):
             if len(g.active) == 1 and not g.finished:
                 g.winner = g.active[0]; g.winner["place"] = 1; g.finished = True
             await gm.broadcast(tid, g.to_dict())
-    elif t.game_type in ("bracket", "castle_bracket"):
-        g = gm.get_bracket(tid) if t.game_type == "bracket" else gm.get_castle_bracket(tid)
+    elif t.game_type == "bracket":
+        g = gm.get_bracket(tid)
         if g:
             advanced_list = g.remove_player(user_id)
             seen = set()
