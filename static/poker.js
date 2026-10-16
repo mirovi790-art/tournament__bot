@@ -12,7 +12,9 @@ let PK_MERGE_UNTIL_MS = 0;
 let PK_MERGE_MODAL_SHOWN = false;
 let PK_UNSEATED_DEADLINE_MS = 0;
 
-/* ---------- тик таймера хода ---------- */
+/* ======================================================================
+   ТИК-ИНТЕРВАЛЫ
+   ====================================================================== */
 setInterval(() => {
   if (!ACTIVE_TID || GAME_TYPE !== "poker") return;
   if (PK_VIEW !== "table") return;
@@ -40,7 +42,6 @@ setInterval(() => {
   });
 }, 250);
 
-/* ---------- merge-баннер отсчёт ---------- */
 setInterval(() => {
   if (!ACTIVE_TID || GAME_TYPE !== "poker") return;
   const now = Date.now();
@@ -53,7 +54,6 @@ setInterval(() => {
   }
 }, 250);
 
-/* ---------- обратный отсчёт до авто-кика нерассаженных ---------- */
 setInterval(() => {
   if (!ACTIVE_TID || GAME_TYPE !== "poker") return;
   if (PK_VIEW !== "lobby") return;
@@ -65,9 +65,9 @@ setInterval(() => {
   if (rem <= 0) PK_UNSEATED_DEADLINE_MS = 0;
 }, 500);
 
-/* ============================================================
+/* ======================================================================
    LOBBY
-   ============================================================ */
+   ====================================================================== */
 function renderPokerLobby(s) {
   LAST_STATE = s;
   PK_LAST_LOBBY = s;
@@ -256,9 +256,9 @@ function openPokerTable(tableId) {
   els.roomContent.innerHTML = `<div class="waiting-box"><div class="waiting-ico">🃏</div><div class="waiting-txt">Подключение к столу…</div></div>`;
 }
 
-/* ============================================================
+/* ======================================================================
    TABLE
-   ============================================================ */
+   ====================================================================== */
 function pokerSeatPositions(total) {
   const positions = [];
   const nOpp = Math.max(0, total - 1);
@@ -281,12 +281,15 @@ function pokerSeatPositions(total) {
 }
 
 function cardMiniHtml(card) {
+  /* Карты соперников: только рубашки — лицо открывается в шоудауне */
   if (!card || card === "?" || card.length < 2) return `<div class="mini"></div>`;
+  /* Если сервер прислал реальную карту (шоудаун), рисуем лицо */
   const r = card[0] === "T" ? "10" : card[0];
   const s = card.slice(1);
   const red = (s === "♥" || s === "♦") ? " red" : "";
   return `<div class="mini face${red}">${r}<span class="s">${s}</span></div>`;
 }
+
 function cardBigHtml(card) {
   if (!card || card === "?" || card.length < 2) return `<div class="card empty"></div>`;
   const r = card[0] === "T" ? "10" : card[0];
@@ -316,6 +319,7 @@ function renderPokerState(s) {
   const positions = pokerSeatPositions(players.length);
   els.rmCounter.textContent = `Стол #${s.table_id || 0} · Раздача #${s.hand_number || 0} · Блайнды ${s.sb || 10}/${s.bb || 20}`;
 
+  /* ============ Построение мест ============ */
   let seatsHtml = "";
   const order = [];
   for (let i = 0; i < players.length; i++) if (i !== meIdx) order.push(i);
@@ -328,9 +332,17 @@ function renderPokerState(s) {
     const folded = !!p.folded;
     const sitOut = !!p.sit_out;
     const isOut = (p.finish_place !== null && p.finish_place !== undefined);
+    const isMe = (idx === meIdx);
     const lastAction = p.last_action || "";
     const lastActionCls = lastAction.toLowerCase().split(/\s+/)[0];
-    const cardsHtml = (p.cards || []).map(c => cardMiniHtml(c)).join("");
+
+    /* ВАЖНО: карты в мини-виде показываем только у соперников.
+       У себя они уже показаны крупно в myZone. */
+    let cardsHtml = "";
+    if (!isMe && !isOut && (p.cards || []).length) {
+      cardsHtml = (p.cards || []).map(c => cardMiniHtml(c)).join("");
+    }
+
     let cls = "poker-seat";
     if (isTurn) cls += " turn";
     if (isDealer) cls += " dealer";
@@ -339,9 +351,7 @@ function renderPokerState(s) {
     if (isOut) cls += " out";
 
     let betChipHtml = "";
-    if (p.bet > 0) {
-      betChipHtml = `<div class="bet-chip">${p.bet}</div>`;
-    }
+    if (p.bet > 0) betChipHtml = `<div class="bet-chip">${p.bet}</div>`;
 
     seatsHtml += `
       <div class="${cls}" data-idx="${idx}" style="left:${pos[0]}%;top:${pos[1]}%;">
@@ -352,22 +362,24 @@ function renderPokerState(s) {
             <circle class="poker-timer-ring" cx="50" cy="50" r="45"
                     stroke-dasharray="283" stroke-dashoffset="283"/>
           </svg>
-          <div class="poker-avatar">${idx === meIdx ? "🙋" : "👤"}</div>
+          <div class="poker-avatar">${isMe ? "🙋" : "👤"}</div>
         </div>
-        <div class="pname">${escapeHtml(p.name)}${idx === meIdx ? " (вы)" : ""}</div>
+        <div class="pname">${escapeHtml(p.name)}${isMe ? " (вы)" : ""}</div>
         <div class="pchips">💰 ${p.chips}</div>
-        ${!isOut && cardsHtml ? `<div class="pcards">${cardsHtml}</div>` : ""}
+        ${cardsHtml ? `<div class="pcards">${cardsHtml}</div>` : ""}
         ${isOut ? `<div class="pfinish">#${p.finish_place}</div>` : ""}
         ${betChipHtml}
       </div>`;
   });
 
+  /* ============ Community ============ */
   const community = s.community || [];
   let commHtml = "";
   for (let i = 0; i < 5; i++) {
     commHtml += community[i] ? cardBigHtml(community[i]) : `<div class="card empty"></div>`;
   }
 
+  /* ============ Side pots ============ */
   const sidePotsHtml = (s.side_pots && s.side_pots.length)
     ? `<div class="poker-sidepots">${s.side_pots.map((sp, i) => `<span class="sp">Side ${i + 1}: ${sp.amount}</span>`).join("")}</div>`
     : "";
@@ -378,6 +390,7 @@ function renderPokerState(s) {
   };
   const phaseLabel = phaseNames[s.phase] || s.phase || "";
 
+  /* ============ Merge banner ============ */
   let mergeBanner = "";
   if (s.merge_warning_until && s.merge_warning_until * 1000 > Date.now()) {
     const rem = Math.max(0, Math.ceil((s.merge_warning_until * 1000 - Date.now()) / 1000));
@@ -388,6 +401,7 @@ function renderPokerState(s) {
       </div>`;
   }
 
+  /* ============ Стол ============ */
   const feltHtml = `
     <div class="poker-table-wrap">
       <div class="poker-felt">
@@ -401,6 +415,7 @@ function renderPokerState(s) {
       </div>
     </div>`;
 
+  /* ============ Мои карты (крупно) ============ */
   const myCardsHtml = (me.cards || []).map(c => {
     if (!c || c === "?" || c.length < 2) return "";
     const r = c[0] === "T" ? "10" : c[0];
@@ -415,11 +430,12 @@ function renderPokerState(s) {
       ${myHandName ? `<div class="hand-name">${escapeHtml(myHandName)}</div>` : ""}
     </div>`;
 
+  /* ============ Панель управления ============ */
   const isMyTurn = s.turn_idx === meIdx && !me.folded && !me.all_in && !me.sit_out && !me.finish_place;
-  const canCheck = s.can_check;
-  const canCall = s.can_call;
-  const canBet = s.can_bet;
-  const canRaise = s.can_raise;
+  const canCheck = !!s.can_check;
+  const canCall = !!s.can_call;
+  const canBet = !!s.can_bet;
+  const canRaise = !!s.can_raise;
   const toCall = s.me_to_call || 0;
   const myMaxBet = s.my_max_bet || 0;
   const myMinBet = s.my_min_bet || 0;
@@ -432,7 +448,9 @@ function renderPokerState(s) {
   let controlsHtml = "";
   if (isMyTurn) {
     const mainAction2Label = canCheck ? "CHECK" : `CALL ${toCall}`;
-    const mainAction3Label = canBet ? `BET ${PK_CUR_BET}` : (canRaise ? `RAISE ${PK_CUR_BET}` : "BET");
+    const canBetOrRaise = canBet || canRaise;
+    const mainAction3Label = canBet ? `BET ${PK_CUR_BET}` :
+      (canRaise ? `RAISE ${PK_CUR_BET}` : "RAISE");
     controlsHtml = `
       <div class="poker-controls"><div class="frame">
         <div class="bet-slider-row">
@@ -452,7 +470,7 @@ function renderPokerState(s) {
         <div class="main-actions">
           <button class="act-fold" data-act="fold">FOLD</button>
           <button class="${canCheck ? "act-check" : "act-call"}" data-act="${canCheck ? "check" : "call"}">${mainAction2Label}</button>
-          <button class="${canBet ? "act-bet" : "act-raise"}" data-act="${canBet ? "bet" : "raise"}" ${(!canBet && !canRaise) ? "disabled" : ""}>${mainAction3Label}</button>
+          <button class="${canBet ? "act-bet" : "act-raise"}" data-act="${canBet ? "bet" : "raise"}" ${canBetOrRaise ? "" : "disabled"}>${mainAction3Label}</button>
         </div>
         <div class="poker-utility">
           <button id="pk-sitout" class="${me.sit_out ? "active" : ""}">${me.sit_out ? "↩️ I'm back" : "💤 Sit out"}</button>
@@ -469,7 +487,8 @@ function renderPokerState(s) {
     const waitingLabel = activePlayer
       ? `Ход: <span class="who">${escapeHtml(activePlayer.name)}</span>`
       : (s.phase === "showdown" ? "Вскрытие…" : "Ожидание…");
-    const canPreAct = !me.folded && !me.sit_out && !me.finish_place && s.phase !== "showdown" && !s.finished;
+    const canPreAct = !me.folded && !me.sit_out && !me.finish_place
+      && s.phase !== "showdown" && !s.finished;
     controlsHtml = `
       <div class="poker-controls"><div class="frame">
         ${canPreAct ? `
@@ -494,7 +513,7 @@ function renderPokerState(s) {
 
   els.roomContent.innerHTML = mergeBanner + feltHtml + myZoneHtml + controlsHtml;
 
-  /* ---------- навешивание событий ---------- */
+  /* ============ События ============ */
   const sl = document.getElementById("bet-slider");
   if (sl) sl.addEventListener("input", () => { PK_CUR_BET = parseInt(sl.value, 10) || 0; pkUpdateBetUI(); });
   const bm = document.getElementById("bet-minus");
@@ -611,9 +630,9 @@ function handleMergeWarning(msg) {
   try { tg?.HapticFeedback?.notificationOccurred?.("warning"); } catch (e) {}
 }
 
-/* ============================================================
+/* ======================================================================
    ХУКИ
-   ============================================================ */
+   ====================================================================== */
 registerHooks({
   poker: renderPokerState,
   pokerLobby: renderPokerLobby,
