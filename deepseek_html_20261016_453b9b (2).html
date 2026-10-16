@@ -1,0 +1,2466 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+<title>Турнир · Mini App</title>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<style>
+:root{
+  --bg:#0a0a0a;--bg-2:#111111;--card:#141414;--card-2:#1a1a1a;--card-3:#1e1e1e;
+  --border:rgba(255,180,60,.18);--border-2:rgba(255,180,60,.32);--border-strong:rgba(255,180,60,.6);
+  --gold:#ffcc00;--gold-2:#ffa500;--gold-3:#d4a017;--orange:#ff8800;
+  --red:#cc0000;--red-2:#8b0000;--green:#22c55e;--green-2:#16a34a;
+  --text:#f5f5f5;--text-dim:#9a9a9a;--text-muted:#6b6b6b;
+  --shadow-card:0 4px 18px rgba(0,0,0,.6);
+}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent;}
+html,body{margin:0;padding:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;background:var(--bg);color:var(--text);min-height:100vh;user-select:none;overflow-x:hidden;}
+body::before{content:'';position:fixed;inset:0;pointer-events:none;background:
+  radial-gradient(circle at 20% 10%,rgba(255,140,0,.06),transparent 40%),
+  radial-gradient(circle at 80% 90%,rgba(220,20,60,.05),transparent 40%);z-index:0;}
+#app{position:relative;z-index:1;display:flex;flex-direction:column;min-height:100vh;}
+.hidden{display:none!important;}
+
+#topbar{display:flex;align-items:center;gap:8px;padding:12px 14px;background:linear-gradient(180deg,#111111,#0d0d0d);border-bottom:1px solid var(--border);position:sticky;top:0;z-index:20;flex-wrap:wrap;}
+#title{display:flex;align-items:center;gap:8px;font-weight:900;font-size:16px;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#fff;letter-spacing:.2px;min-width:0;}
+#title .ic{font-size:20px;flex-shrink:0;filter:drop-shadow(0 0 8px rgba(255,180,60,.7));}
+.status{display:inline-flex;align-items:center;gap:6px;font-size:11px;padding:6px 12px;border-radius:999px;background:linear-gradient(135deg,#0d3d1e,#0a2a14);color:#4ade80;border:1px solid rgba(34,197,94,.5);font-weight:800;letter-spacing:.3px;flex-shrink:0;}
+.status::before{content:'';width:8px;height:8px;border-radius:50%;background:#22c55e;box-shadow:0 0 8px #22c55e;}
+.status.err{background:linear-gradient(135deg,#3d0d0d,#2a0a0a);color:#f87171;border-color:rgba(220,38,38,.5);}
+.status.err::before{background:#dc2626;box-shadow:0 0 8px #dc2626;}
+
+.btn-top{display:inline-flex;align-items:center;gap:5px;padding:7px 12px;border-radius:10px;font-size:11px;font-weight:900;cursor:pointer;border:1px solid;letter-spacing:.3px;transition:transform .15s,box-shadow .2s;flex-shrink:0;}
+.btn-top:active{transform:scale(.95);}
+.btn-top.warn{background:linear-gradient(135deg,rgba(255,136,0,.15),rgba(204,0,0,.15));border-color:rgba(255,136,0,.55);color:#ffb366;}
+.btn-top.danger{background:linear-gradient(135deg,rgba(204,0,0,.15),rgba(139,0,0,.15));border-color:rgba(204,0,0,.55);color:#ff7a7a;}
+.btn-top.gold{background:linear-gradient(135deg,rgba(255,180,60,.15),rgba(255,136,0,.1));border-color:rgba(255,180,60,.55);color:var(--gold);}
+
+.tabs{display:flex;background:linear-gradient(180deg,#0d0d0d,#111111);border-bottom:1px solid var(--border);padding:0 6px;}
+.tab{flex:1;padding:16px 10px;text-align:center;font-weight:800;font-size:14px;color:var(--text-dim);cursor:pointer;position:relative;transition:color .2s;display:flex;align-items:center;justify-content:center;gap:6px;}
+.tab.active{color:var(--gold);background:linear-gradient(180deg,rgba(255,180,60,.06),transparent);}
+.tab.active::after{content:'';position:absolute;left:20%;right:20%;bottom:0;height:3px;background:linear-gradient(90deg,var(--orange),var(--gold),var(--orange));border-radius:3px 3px 0 0;box-shadow:0 0 12px var(--gold-2);}
+
+.view{flex:1;display:flex;flex-direction:column;padding-bottom:20px;}
+
+.pf-wrap{padding:16px 14px;}
+.profile-hero{position:relative;background:linear-gradient(180deg,#141414,#0e0e0e);border:1px solid var(--border-2);border-radius:22px;padding:44px 20px 26px;text-align:center;overflow:hidden;box-shadow:var(--shadow-card),inset 0 1px 0 rgba(255,255,255,.03);}
+.profile-hero::before{content:'';position:absolute;top:-60%;left:50%;transform:translateX(-50%);width:280px;height:280px;border-radius:50%;background:radial-gradient(circle,rgba(255,180,60,.15),transparent 60%);pointer-events:none;}
+.avatar-wrap{position:relative;display:inline-block;margin-bottom:16px;}
+.avatar-circle{width:130px;height:130px;border-radius:50%;background:radial-gradient(circle at 50% 40%,#1e40af 0%,#0a1628 80%);border:3px solid #d4a017;box-shadow:0 0 0 3px rgba(212,160,23,.25),0 0 40px rgba(255,180,60,.55),0 0 80px rgba(255,140,0,.35),inset 0 -20px 40px rgba(0,0,0,.5);display:flex;align-items:center;justify-content:center;position:relative;}
+.avatar-circle svg{width:80%;height:80%;}
+.crown{position:absolute;top:-28px;left:50%;transform:translateX(-50%);font-size:38px;line-height:1;filter:drop-shadow(0 0 12px rgba(255,204,0,.9)) drop-shadow(0 4px 8px rgba(0,0,0,.8));animation:crownFloat 3s ease-in-out infinite;z-index:2;}
+@keyframes crownFloat{0%,100%{transform:translateX(-50%) translateY(0);}50%{transform:translateX(-50%) translateY(-4px);}}
+.crown-sparkles{position:absolute;top:-10px;left:50%;transform:translateX(-50%);width:120px;height:40px;pointer-events:none;z-index:1;}
+.crown-sparkles::before,.crown-sparkles::after{content:'';position:absolute;width:6px;height:6px;border-radius:50%;background:var(--gold);box-shadow:0 0 8px var(--gold);animation:sparkle 2s infinite;}
+.crown-sparkles::before{left:10px;top:10px;animation-delay:.3s;}
+.crown-sparkles::after{right:10px;top:14px;animation-delay:1.2s;}
+@keyframes sparkle{0%,100%{opacity:.3;transform:scale(.8);}50%{opacity:1;transform:scale(1.3);}}
+.pf-name{font-size:24px;font-weight:900;color:#fff;margin-bottom:4px;}
+.pf-uname{font-size:14px;color:var(--text-dim);margin-bottom:14px;}
+.pf-role{display:inline-flex;align-items:center;gap:6px;padding:8px 18px;border-radius:999px;font-size:13px;font-weight:900;background:linear-gradient(135deg,rgba(204,0,0,.25),rgba(139,0,0,.25));color:#ff6b6b;border:1px solid rgba(204,0,0,.5);box-shadow:0 0 16px rgba(204,0,0,.3);}
+.pf-role.player{background:linear-gradient(135deg,rgba(255,136,0,.2),rgba(255,180,60,.15));color:var(--gold);border-color:rgba(255,180,60,.5);box-shadow:0 0 16px rgba(255,180,60,.3);}
+.stat-card{margin-top:14px;background:linear-gradient(135deg,#141414,#0e0e0e);border:1px solid var(--border-2);border-radius:18px;padding:18px 20px;display:flex;align-items:center;justify-content:space-between;box-shadow:var(--shadow-card);position:relative;overflow:hidden;}
+.stat-card::before{content:'';position:absolute;left:0;top:0;bottom:0;width:3px;background:linear-gradient(180deg,var(--gold),var(--orange));box-shadow:0 0 12px var(--gold-2);}
+.stat-left{display:flex;align-items:center;gap:10px;font-size:15px;font-weight:800;color:#fff;}
+.stat-left .ic{font-size:22px;filter:drop-shadow(0 0 8px rgba(255,180,60,.5));}
+.stat-right{display:flex;align-items:center;gap:8px;}
+.stat-value{font-size:28px;font-weight:900;background:linear-gradient(135deg,var(--gold),var(--gold-2));-webkit-background-clip:text;background-clip:text;color:transparent;line-height:1;}
+.stat-laurel{font-size:26px;filter:drop-shadow(0 0 10px rgba(255,180,60,.6));}
+
+.tr-list{padding:14px;display:flex;flex-direction:column;gap:12px;}
+.tr-card{background:linear-gradient(135deg,#141414,#0e0e0e);border:1px solid var(--border-2);border-radius:18px;padding:16px;display:flex;flex-direction:column;gap:10px;box-shadow:var(--shadow-card);position:relative;overflow:hidden;}
+.tr-card::before{content:'';position:absolute;left:0;top:0;bottom:0;width:3px;background:linear-gradient(180deg,var(--orange),var(--red));box-shadow:0 0 12px var(--orange);}
+.tr-card .hdr{display:flex;justify-content:space-between;align-items:center;gap:10px;}
+.tr-card .name{font-size:16px;font-weight:900;color:#fff;}
+.tr-card .emoji{font-size:26px;filter:drop-shadow(0 0 8px rgba(255,180,60,.5));}
+.tr-card .meta{display:flex;gap:10px;flex-wrap:wrap;font-size:12px;color:var(--text-dim);align-items:center;}
+.tr-card .meta b{color:var(--gold);}
+.tr-card .btn-start{padding:13px;border-radius:12px;border:none;background:linear-gradient(135deg,var(--orange),var(--red));color:#fff;font-weight:900;font-size:14px;cursor:pointer;letter-spacing:1px;box-shadow:0 4px 16px rgba(255,107,0,.4);}
+.tr-card .btn-start:disabled{background:#1e1e1e;color:#555;box-shadow:none;cursor:default;}
+.empty{padding:60px 20px;text-align:center;color:var(--text-muted);font-weight:700;}
+
+.room-head{padding:14px 14px 6px;text-align:center;}
+.room-head-badges{display:flex;justify-content:center;gap:8px;flex-wrap:wrap;margin-bottom:12px;}
+.room-badge{display:inline-flex;align-items:center;gap:6px;padding:7px 14px;border-radius:999px;font-size:12px;font-weight:800;background:linear-gradient(135deg,#1a1a1a,#0e0e0e);border:1px solid var(--border-2);color:#fff;}
+.room-badge .ic{font-size:15px;}
+.room-badge.gold{background:linear-gradient(135deg,rgba(255,180,60,.15),rgba(255,136,0,.1));color:var(--gold);border-color:rgba(255,180,60,.5);box-shadow:0 0 16px rgba(255,180,60,.25);}
+.room-title{font-size:13px;font-weight:900;color:var(--gold);letter-spacing:2px;text-transform:uppercase;margin-bottom:6px;display:flex;align-items:center;justify-content:center;gap:8px;}
+.room-head-sep{margin:14px auto 0;max-width:640px;height:1px;background:linear-gradient(90deg,transparent,var(--border-strong),transparent);}
+
+.score-panel{margin:14px auto 0;max-width:640px;width:100%;padding:0 14px;}
+.score-frame{background:linear-gradient(180deg,#141414,#0e0e0e);border:1px solid var(--border-2);border-radius:18px;padding:14px 12px;display:flex;align-items:center;justify-content:space-between;gap:10px;box-shadow:var(--shadow-card);}
+.score-player{flex:1;display:flex;flex-direction:column;align-items:center;gap:5px;min-width:0;}
+.score-player .ava{width:44px;height:44px;border-radius:50%;background:radial-gradient(circle at 50% 40%,#1e3a8a,#0a1628);border:2px solid var(--border-strong);display:flex;align-items:center;justify-content:center;font-size:22px;box-shadow:0 0 12px rgba(255,180,60,.3);}
+.score-player .nm{font-size:12px;font-weight:800;color:#fff;max-width:110px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:center;}
+.score-player .score-num{font-size:28px;font-weight:900;line-height:1;background:linear-gradient(135deg,var(--gold),var(--orange));-webkit-background-clip:text;background-clip:text;color:transparent;filter:drop-shadow(0 0 10px rgba(255,180,60,.5));}
+.score-player .tag{font-size:10px;font-weight:900;padding:3px 8px;border-radius:999px;}
+.score-player .tag.notready{background:rgba(204,0,0,.15);color:#ff8080;border:1px solid rgba(204,0,0,.4);}
+.score-player .tag.ready{background:rgba(34,197,94,.15);color:#6ee7a6;border:1px solid rgba(34,197,94,.4);}
+.score-vs{flex-shrink:0;display:flex;flex-direction:column;align-items:center;gap:4px;padding:0 6px;}
+.score-vs .vs-label{font-size:11px;font-weight:900;color:var(--text-muted);letter-spacing:2px;}
+.score-vs .target{font-size:10px;font-weight:800;color:var(--orange);}
+.score-vs .score-round{font-size:10px;font-weight:900;color:var(--gold);text-transform:uppercase;letter-spacing:1px;}
+
+.wheel-arena{margin:16px auto;max-width:640px;width:100%;padding:0 14px;}
+.wheel-caption{text-align:center;font-size:13px;font-weight:900;color:#fff;letter-spacing:1px;margin-bottom:10px;display:flex;align-items:center;justify-content:center;gap:8px;}
+.wheel-caption .ic{font-size:16px;}
+.wheel-frame{position:relative;background:linear-gradient(180deg,#141414,#0a0a0a);border:1px solid var(--border-2);border-radius:22px;padding:16px;box-shadow:var(--shadow-card),inset 0 0 40px rgba(255,140,0,.05);}
+.wheel-frame::before{content:'';position:absolute;inset:6px;border-radius:18px;border:1px solid rgba(255,180,60,.12);pointer-events:none;}
+.wheel-frame-inner{position:relative;aspect-ratio:1/1;width:100%;display:flex;align-items:center;justify-content:center;}
+#wheel{position:relative;z-index:2;width:100%;height:100%;max-width:520px;display:block;filter:drop-shadow(0 6px 20px rgba(0,0,0,.7));}
+.pointer{position:absolute;top:-4px;left:50%;transform:translateX(-50%);z-index:5;font-size:0;filter:drop-shadow(0 0 10px var(--gold-2)) drop-shadow(0 4px 8px rgba(0,0,0,.9));}
+.pointer::before{content:'';display:block;width:0;height:0;border-left:18px solid transparent;border-right:18px solid transparent;border-top:32px solid var(--gold-2);}
+.pointer::after{content:'';position:absolute;top:-8px;left:50%;transform:translateX(-50%);width:18px;height:18px;border-radius:50%;background:radial-gradient(circle at 40% 40%,#ff5566,#8b0000 60%,#3a0000);box-shadow:0 0 12px #ff3344,0 0 24px rgba(255,50,80,.6),inset 0 -2px 4px rgba(0,0,0,.5);border:2px solid #d4a017;}
+
+.bottom-panel{margin:8px auto 20px;max-width:640px;width:100%;padding:0 14px;}
+.bottom-frame{background:linear-gradient(180deg,#141414,#0e0e0e);border:1px solid var(--border-2);border-radius:18px;padding:16px;display:flex;flex-direction:column;gap:10px;box-shadow:var(--shadow-card);}
+.bottom-title{font-size:11px;font-weight:900;color:var(--gold);letter-spacing:2px;text-transform:uppercase;text-align:center;margin-bottom:2px;}
+.ready-btn{display:flex;justify-content:center;}
+.ready-btn button{padding:16px 48px;border-radius:14px;border:none;background:linear-gradient(135deg,var(--orange),var(--red));color:#fff;font-weight:900;font-size:15px;letter-spacing:1.5px;cursor:pointer;box-shadow:0 4px 20px rgba(255,107,0,.5),0 0 40px rgba(255,136,0,.25);transition:transform .15s,box-shadow .2s;min-width:220px;}
+.ready-btn button:disabled{background:#1e1e1e;color:#555;box-shadow:none;cursor:default;}
+.ready-btn button.pressed{background:linear-gradient(135deg,#16a34a,#15803d);cursor:default;box-shadow:0 4px 20px rgba(34,197,94,.4);}
+.bottom-info{text-align:center;color:var(--text-dim);font-size:13px;font-weight:700;}
+.bottom-info.muted{color:var(--text-muted);}
+
+.participants{margin:8px auto 20px;max-width:640px;width:100%;padding:0 14px;}
+.participants-frame{background:linear-gradient(180deg,#141414,#0e0e0e);border:1px solid var(--border-2);border-radius:18px;padding:14px;box-shadow:var(--shadow-card);}
+.participants h3{margin:0 0 10px;font-size:13px;font-weight:900;color:var(--gold);letter-spacing:1px;display:flex;align-items:center;gap:8px;text-transform:uppercase;}
+.p-list{display:flex;flex-direction:column;gap:8px;max-height:280px;overflow-y:auto;}
+.p-row{display:flex;justify-content:space-between;align-items:center;padding:11px 14px;border-radius:12px;font-size:13px;font-weight:800;background:linear-gradient(180deg,#1a1a1a,#141414);border:1px solid var(--border);position:relative;}
+.p-row::before{content:'';position:absolute;left:0;top:0;bottom:0;width:3px;border-radius:3px 0 0 3px;background:linear-gradient(180deg,#22c55e,#16a34a);box-shadow:0 0 8px #22c55e;}
+.p-row span:first-child{color:#fff;display:flex;align-items:center;gap:8px;}
+.p-row span:last-child{color:#4ade80;font-size:12px;}
+.p-row.elim{opacity:.5;}
+.p-row.elim::before{background:linear-gradient(180deg,#dc2626,#8b0000);box-shadow:0 0 8px #dc2626;}
+.p-row.elim span:first-child{color:#888;text-decoration:line-through;}
+.p-row.elim span:last-child{color:#f87171;}
+.p-row.win::before{background:linear-gradient(180deg,var(--gold),var(--gold-2));box-shadow:0 0 10px var(--gold-2);}
+.p-row.win span:first-child{color:var(--gold);}
+.p-row.win span:last-child{color:var(--gold);}
+
+.waiting-box{display:flex;flex-direction:column;align-items:center;justify-content:center;flex:1;padding:60px 20px;gap:16px;text-align:center;}
+.waiting-ico{font-size:72px;animation:pulse 1.8s infinite ease-in-out;filter:drop-shadow(0 0 20px rgba(255,140,0,.5));}
+@keyframes pulse{0%,100%{opacity:1;transform:scale(1);}50%{opacity:.7;transform:scale(1.06);}}
+.waiting-txt{font-size:15px;color:var(--text-dim);font-weight:800;}
+
+.modal{position:fixed;inset:0;background:rgba(0,0,0,.85);display:flex;align-items:center;justify-content:center;z-index:100;padding:16px;backdrop-filter:blur(4px);}
+.modal-card{background:linear-gradient(180deg,#141414,#0a0a0a);border:1px solid var(--border-strong);border-radius:20px;padding:26px 22px;max-width:380px;width:100%;text-align:center;animation:pop .25s ease-out;max-height:90vh;overflow-y:auto;box-shadow:0 0 40px rgba(255,140,0,.2),0 20px 60px rgba(0,0,0,.8);}
+@keyframes pop{from{transform:scale(.9);opacity:0;}to{transform:scale(1);opacity:1;}}
+#modal-title{font-size:20px;font-weight:900;margin-bottom:14px;background:linear-gradient(135deg,var(--gold),var(--orange));-webkit-background-clip:text;background-clip:text;color:transparent;}
+#modal-body{font-size:14px;color:#e5e5e5;margin-bottom:16px;line-height:1.6;}
+.modal-btns{display:flex;gap:8px;flex-wrap:wrap;}
+.modal-btns .btn{flex:1;min-width:120px;font-size:13px;padding:12px 10px;}
+.kick-list{display:flex;flex-direction:column;gap:8px;margin-top:10px;max-height:50vh;overflow-y:auto;}
+.kick-row{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px 12px;background:linear-gradient(180deg,#1a1a1a,#141414);border-radius:10px;border:1px solid var(--border);font-size:14px;}
+.kick-row .kick-name{flex:1;text-align:left;font-weight:800;color:#fff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.kick-row .kick-x{flex-shrink:0;background:linear-gradient(135deg,#8b0000,#dc2626);color:#fff;border:none;border-radius:8px;padding:6px 12px;font-size:14px;font-weight:900;cursor:pointer;box-shadow:0 0 12px rgba(204,0,0,.4);}
+.confetti{position:fixed;inset:0;pointer-events:none;z-index:99;}
+.countdown-text{color:var(--gold);font-size:14px;font-weight:900;margin-top:8px;}
+
+.bracket-wrap{padding:14px;display:flex;flex-direction:column;gap:16px;overflow-x:hidden;}
+.bracket-columns{display:flex;gap:14px;overflow-x:auto;padding-bottom:10px;}
+.bracket-col{display:flex;flex-direction:column;gap:12px;min-width:190px;}
+.bracket-col-title{text-align:center;font-size:11px;font-weight:900;color:var(--gold);background:linear-gradient(135deg,rgba(255,180,60,.12),rgba(255,136,0,.06));padding:9px 10px;border-radius:10px;letter-spacing:1.5px;text-transform:uppercase;border:1px solid var(--border-strong);box-shadow:0 0 16px rgba(255,180,60,.15);}
+.bracket-match{background:linear-gradient(180deg,#141414,#0e0e0e);border:1px solid var(--border-2);border-radius:14px;padding:8px;display:flex;flex-direction:column;gap:6px;transition:all .3s;box-shadow:var(--shadow-card);position:relative;overflow:hidden;}
+.bracket-match.finished{border-color:var(--gold-2);box-shadow:0 0 18px rgba(255,180,60,.35),var(--shadow-card);}
+.bracket-match.active{border-color:var(--orange);box-shadow:0 0 22px rgba(255,136,0,.5),var(--shadow-card);}
+.bracket-player{display:flex;align-items:center;gap:6px;padding:7px 9px;background:rgba(10,10,10,.6);border-radius:8px;font-size:12px;border:1px solid rgba(255,180,60,.08);}
+.bracket-player .bp-name{flex:1;font-weight:800;color:#e5e5e5;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.bracket-player.winner{background:linear-gradient(90deg,rgba(255,180,60,.2),rgba(10,10,10,.6));border-color:var(--border-strong);}
+.bracket-player.winner .bp-name{color:var(--gold);font-weight:900;}
+.bracket-player.loser .bp-name{color:#666;text-decoration:line-through;}
+.bracket-score{font-size:11px;color:var(--gold);font-weight:900;margin-left:4px;background:rgba(255,180,60,.15);padding:2px 6px;border-radius:6px;border:1px solid var(--border-strong);}
+.bracket-check{flex-shrink:0;width:26px;height:26px;border-radius:6px;border:1px solid var(--border-strong);background:#1a1a1a;color:#555;cursor:pointer;display:flex;align-items:center;justify-content:center;font-weight:900;font-size:14px;transition:all .2s;}
+.bracket-check:disabled{cursor:default;opacity:.7;}
+.bracket-check.checked{background:linear-gradient(135deg,var(--orange),var(--red));border-color:var(--orange);color:#fff;box-shadow:0 0 12px rgba(255,136,0,.6);}
+.bracket-check.notmine{cursor:default;}
+.bracket-enter-btn{margin-top:4px;padding:10px;border-radius:9px;border:none;background:linear-gradient(135deg,var(--orange),var(--red));color:#fff;font-weight:900;font-size:12px;cursor:pointer;letter-spacing:1px;box-shadow:0 3px 12px rgba(255,107,0,.4);}
+.bracket-enter-btn:disabled{background:#1e1e1e;color:#555;cursor:not-allowed;box-shadow:none;}
+.bracket-enter-btn.admin-view{background:linear-gradient(135deg,#0891b2,#06b6d4);}
+.bracket-enter-btn.spectate{background:linear-gradient(135deg,#333,#222);color:#bbb;}
+.bracket-vs{text-align:center;font-size:10px;color:#555;font-weight:900;letter-spacing:1px;margin:-2px 0;}
+
+.rooms-list{padding:14px;display:flex;flex-direction:column;gap:12px;}
+.room-card{background:linear-gradient(180deg,#141414,#0e0e0e);border:1px solid var(--border-2);border-radius:16px;padding:14px;display:flex;flex-direction:column;gap:10px;box-shadow:var(--shadow-card);}
+.room-card .rc-hdr{display:flex;justify-content:space-between;align-items:center;gap:10px;}
+.room-card .rc-title{font-size:14px;font-weight:900;color:#fff;letter-spacing:.3px;}
+.room-card .rc-status{font-size:10px;font-weight:900;padding:4px 10px;border-radius:999px;letter-spacing:.5px;text-transform:uppercase;}
+.rc-status.running{background:rgba(255,180,60,.15);color:var(--gold);border:1px solid var(--border-strong);}
+.rc-status.waiting{background:rgba(34,197,94,.12);color:#6ee7a6;border:1px solid rgba(34,197,94,.4);}
+.rc-status.idle{background:rgba(150,150,150,.1);color:#999;border:1px solid rgba(150,150,150,.3);}
+.rc-players{display:flex;flex-direction:column;gap:4px;}
+.rc-player-row{display:flex;justify-content:space-between;align-items:center;font-size:13px;padding:3px 0;}
+.rc-player-row .pname{color:#e5e5e5;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:60%;}
+.rc-player-row .pscore{font-weight:900;color:var(--gold);font-size:15px;}
+.rc-target{font-size:10px;color:var(--text-muted);text-align:right;}
+
+.dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:#22c55e;box-shadow:0 0 6px #22c55e;}
+
+/* ============================================================
+   POKER LOBBY
+   ============================================================ */
+.pk-lobby{padding:8px 10px 20px;display:flex;flex-direction:column;gap:12px;}
+.pk-lobby-tabs{display:flex;gap:0;background:linear-gradient(180deg,#0d0d0d,#111);border:1px solid var(--border-2);border-radius:14px;padding:4px;position:sticky;top:60px;z-index:15;}
+.pk-lobby-tab{flex:1;padding:12px 8px;text-align:center;font-weight:900;font-size:13px;color:var(--text-dim);cursor:pointer;border-radius:10px;transition:all .2s;display:flex;align-items:center;justify-content:center;gap:6px;}
+.pk-lobby-tab.active{background:linear-gradient(135deg,rgba(255,180,60,.2),rgba(255,136,0,.15));color:var(--gold);box-shadow:0 0 14px rgba(255,180,60,.3);}
+
+.pk-lobby-info{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;}
+.pk-info-cell{background:linear-gradient(180deg,#141414,#0e0e0e);border:1px solid var(--border-2);border-radius:12px;padding:8px 6px;text-align:center;}
+.pk-info-cell .lbl{font-size:9px;font-weight:900;color:var(--gold);letter-spacing:.5px;text-transform:uppercase;}
+.pk-info-cell .val{font-size:14px;font-weight:900;color:#fff;margin-top:2px;}
+
+.pk-unseated-banner{
+  padding:12px 14px;border-radius:14px;
+  background:linear-gradient(135deg,rgba(255,180,60,.18),rgba(255,80,0,.1));
+  border:1px solid var(--border-strong);color:#ffd966;
+  font-size:12px;font-weight:900;text-align:center;letter-spacing:.4px;
+  box-shadow:0 0 20px rgba(255,180,60,.25);
+}
+.pk-unseated-banner .big{display:block;font-size:14px;color:#fff;margin-bottom:2px;}
+.pk-unseated-banner .cd{color:#ff8080;font-size:16px;font-weight:900;}
+
+.pk-table-card{
+  background:linear-gradient(180deg,#141414,#0e0e0e);
+  border:1px solid var(--border-2);border-radius:16px;padding:14px;
+  box-shadow:var(--shadow-card);position:relative;overflow:hidden;
+  transition:transform .15s,box-shadow .2s;
+}
+.pk-table-card::before{
+  content:'';position:absolute;left:0;top:0;bottom:0;width:4px;
+  background:linear-gradient(180deg,#22c55e,#15803d);box-shadow:0 0 12px #22c55e;
+}
+.pk-table-card.mine::before{background:linear-gradient(180deg,var(--gold),var(--orange));box-shadow:0 0 14px var(--gold);}
+.pk-table-card.full::before{background:linear-gradient(180deg,#666,#333);box-shadow:none;}
+.pk-table-card:active{transform:scale(.98);}
+.pk-table-card .pkt-hdr{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;}
+.pk-table-card .pkt-title{font-size:15px;font-weight:900;color:#fff;letter-spacing:.3px;}
+.pk-table-card .pkt-status{font-size:10px;font-weight:900;padding:4px 10px;border-radius:999px;text-transform:uppercase;letter-spacing:.5px;}
+.pkt-status.running{background:rgba(255,180,60,.15);color:var(--gold);border:1px solid var(--border-strong);}
+.pkt-status.waiting{background:rgba(34,197,94,.12);color:#6ee7a6;border:1px solid rgba(34,197,94,.4);}
+.pkt-status.merge{background:rgba(255,80,80,.15);color:#ff8080;border:1px solid rgba(255,80,80,.5);}
+.pkt-status.full{background:rgba(150,150,150,.12);color:#999;border:1px solid rgba(150,150,150,.35);}
+.pk-table-card .pkt-meta{display:flex;gap:10px;flex-wrap:wrap;font-size:12px;color:var(--text-dim);margin-bottom:8px;}
+.pk-table-card .pkt-meta b{color:var(--gold);}
+.pk-table-card .pkt-players{display:flex;flex-wrap:wrap;gap:4px;margin-bottom:10px;}
+.pk-table-card .pkt-chip{
+  font-size:10px;font-weight:800;padding:3px 8px;border-radius:999px;
+  background:rgba(255,180,60,.1);border:1px solid rgba(255,180,60,.3);color:#ffcc00;
+}
+.pk-table-card .pkt-btn{
+  padding:11px;border-radius:10px;border:none;width:100%;
+  background:linear-gradient(135deg,var(--orange),var(--red));color:#fff;
+  font-weight:900;font-size:13px;letter-spacing:1px;cursor:pointer;
+  box-shadow:0 4px 16px rgba(255,107,0,.4);
+}
+.pk-table-card .pkt-btn.watch{background:linear-gradient(135deg,#15803d,#22c55e);}
+.pk-table-card .pkt-btn.open{background:linear-gradient(135deg,var(--gold),var(--orange));color:#3a1400;}
+.pk-table-card .pkt-btn.full{background:#1e1e1e;color:#666;box-shadow:none;cursor:default;}
+
+.pk-ranking-list{display:flex;flex-direction:column;gap:6px;}
+.pk-rank-row{
+  display:flex;align-items:center;gap:10px;padding:10px 12px;
+  background:linear-gradient(180deg,#1a1a1a,#141414);
+  border:1px solid var(--border);border-radius:12px;
+  font-size:13px;font-weight:800;position:relative;overflow:hidden;
+}
+.pk-rank-row::before{content:'';position:absolute;left:0;top:0;bottom:0;width:3px;background:linear-gradient(180deg,#22c55e,#15803d);box-shadow:0 0 8px #22c55e;}
+.pk-rank-row.out::before{background:linear-gradient(180deg,#dc2626,#8b0000);box-shadow:0 0 8px #dc2626;opacity:.6;}
+.pk-rank-row.out{opacity:.55;}
+.pk-rank-row.me{border-color:var(--gold);box-shadow:0 0 14px rgba(255,180,60,.3);}
+.pk-rank-row.me::before{background:linear-gradient(180deg,var(--gold),var(--orange));}
+.pk-rank-row .rk-place{
+  flex-shrink:0;width:34px;height:34px;border-radius:10px;
+  background:linear-gradient(135deg,#1a1a1a,#0e0e0e);border:1px solid var(--border-strong);
+  display:flex;align-items:center;justify-content:center;
+  font-weight:900;color:var(--gold);font-size:13px;
+}
+.pk-rank-row.out .rk-place{color:#ff8080;border-color:rgba(220,60,60,.5);}
+.pk-rank-row .rk-name{flex:1;color:#fff;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.pk-rank-row .rk-chips{font-weight:900;color:var(--gold);font-size:14px;flex-shrink:0;}
+.pk-rank-row.out .rk-chips{color:#ff8080;font-size:11px;}
+.pk-rank-row .rk-kick{
+  flex-shrink:0;padding:6px 10px;border-radius:8px;border:none;
+  background:linear-gradient(135deg,#8b0000,#dc2626);color:#fff;
+  font-weight:900;font-size:11px;cursor:pointer;letter-spacing:.3px;
+  box-shadow:0 0 12px rgba(204,0,0,.4);margin-left:4px;
+}
+.pk-rank-row .rk-kick:active{transform:scale(.94);}
+.pk-rank-row .rk-unseated{
+  font-size:10px;font-weight:900;color:#ffa500;
+  background:rgba(255,136,0,.12);border:1px solid rgba(255,136,0,.4);
+  padding:3px 8px;border-radius:999px;margin-left:4px;flex-shrink:0;
+}
+.pk-rank-row .rk-place-seated{
+  font-size:10px;font-weight:900;color:#6ee7a6;
+  background:rgba(34,197,94,.1);border:1px solid rgba(34,197,94,.35);
+  padding:3px 8px;border-radius:999px;margin-left:4px;flex-shrink:0;
+}
+
+/* ============================================================
+   POKER TABLE
+   ============================================================ */
+.poker-table-wrap{padding:6px 4px 0;position:relative;}
+.poker-felt{
+  position:relative;width:100%;max-width:560px;margin:6px auto 0;
+  aspect-ratio:5/6;border-radius:50% / 42%;
+  background:
+    radial-gradient(ellipse at 50% 42%, #1a5a32 0%, #0d3319 60%, #051a0d 100%),
+    repeating-radial-gradient(circle at 50% 50%, rgba(255,255,255,.015) 0 3px, transparent 3px 6px);
+  border:4px solid transparent;background-clip:padding-box;
+  box-shadow:
+    inset 0 0 0 4px #2a1a08,
+    inset 0 0 0 6px #d4a017,
+    inset 0 0 0 8px #6a4a10,
+    inset 0 0 90px rgba(0,0,0,.7),
+    inset 0 0 30px rgba(0,0,0,.9),
+    0 0 40px rgba(34,197,94,.15),
+    0 8px 30px rgba(0,0,0,.7);
+  overflow:visible;
+}
+.poker-felt::before{content:'';position:absolute;inset:16px;border-radius:50% / 42%;border:1px dashed rgba(255,255,255,.06);pointer-events:none;}
+.poker-felt::after{content:'';position:absolute;inset:0;border-radius:50% / 42%;background:radial-gradient(ellipse at 50% 30%, rgba(255,255,255,.06), transparent 55%);pointer-events:none;}
+
+.poker-seat{
+  position:absolute;transform:translate(-50%,-50%);
+  display:flex;flex-direction:column;align-items:center;
+  z-index:5;width:82px;pointer-events:none;transition:opacity .25s;
+}
+.poker-seat.folded,.poker-seat.sitout{opacity:.4;}
+.poker-seat.out{opacity:.25;filter:grayscale(.8);}
+.poker-avatar-wrap{position:relative;width:48px;height:48px;}
+.poker-timer-svg{position:absolute;inset:-5px;width:calc(100% + 10px);height:calc(100% + 10px);transform:rotate(-90deg);pointer-events:none;}
+.poker-timer-bg{fill:none;stroke:rgba(255,180,60,.15);stroke-width:3;}
+.poker-timer-ring{fill:none;stroke:#22c55e;stroke-width:3;stroke-linecap:round;transition:stroke-dashoffset .25s linear;filter:drop-shadow(0 0 4px #22c55e);}
+.poker-timer-ring.warn{stroke:#ffb040;filter:drop-shadow(0 0 6px #ffb040);}
+.poker-timer-ring.danger{stroke:#ff4444;filter:drop-shadow(0 0 8px #ff4444);}
+.poker-avatar{width:100%;height:100%;border-radius:50%;background:radial-gradient(circle at 50% 40%,#1e3a8a,#0a1628);border:2px solid var(--border-strong);display:flex;align-items:center;justify-content:center;font-size:20px;box-shadow:0 2px 8px rgba(0,0,0,.7),0 0 0 1px rgba(0,0,0,.6);}
+.poker-seat.turn .poker-avatar{border-color:#22c55e;box-shadow:0 0 20px #22c55e,0 0 40px rgba(34,197,94,.5);}
+.poker-seat.dealer .poker-avatar::after{
+  content:'D';position:absolute;bottom:-4px;right:-4px;
+  width:18px;height:18px;border-radius:50%;background:#fff;color:#111;
+  font-size:10px;font-weight:900;display:flex;align-items:center;justify-content:center;
+  border:2px solid var(--gold-2);box-shadow:0 0 8px rgba(255,204,0,.7);
+}
+.poker-seat .pname{font-size:10px;font-weight:900;color:#fff;max-width:82px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:center;text-shadow:0 2px 4px #000;margin-top:2px;}
+.poker-seat .pchips{font-size:11px;font-weight:900;color:var(--gold);text-shadow:0 2px 4px #000;}
+.poker-seat .pcards{display:flex;gap:2px;margin-top:2px;}
+.poker-seat .pcards .mini{
+  width:20px;height:28px;border-radius:4px;
+  background:linear-gradient(135deg,#8b0000,#4a0000);
+  background-image:repeating-linear-gradient(45deg,rgba(255,180,60,.35) 0 3px,transparent 3px 6px);
+  border:1px solid rgba(255,180,60,.6);
+  display:flex;align-items:center;justify-content:center;
+  box-shadow:0 2px 4px rgba(0,0,0,.6);font-size:10px;font-weight:900;
+}
+.poker-seat .pcards .mini.face{background:#fff;background-image:none;color:#111;border-color:#333;}
+.poker-seat .pcards .mini.face.red{color:#dc143c;}
+.poker-seat .pcards .mini.face .s{font-size:11px;}
+.poker-seat .last-action{
+  position:absolute;top:-6px;left:50%;transform:translateX(-50%);
+  padding:2px 7px;border-radius:999px;font-size:9px;font-weight:900;letter-spacing:.3px;
+  background:linear-gradient(135deg,rgba(0,0,0,.95),rgba(20,20,20,1));
+  border:1px solid var(--border-strong);color:var(--gold);white-space:nowrap;
+  box-shadow:0 2px 6px rgba(0,0,0,.9);text-transform:uppercase;
+}
+.poker-seat .last-action.fold{color:#ff8080;border-color:rgba(220,60,60,.7);}
+.poker-seat .last-action.call,.poker-seat .last-action.check{color:#6ee7a6;border-color:rgba(34,197,94,.7);}
+.poker-seat .last-action.raise,.poker-seat .last-action.bet,.poker-seat .last-action.all-in{color:#ffb366;border-color:rgba(255,136,0,.8);}
+.poker-seat .bet-chip{
+  margin-top:2px;padding:2px 7px;border-radius:999px;font-size:10px;font-weight:900;
+  background:linear-gradient(135deg,var(--gold),var(--orange));color:#3a1400;
+  box-shadow:0 2px 6px rgba(255,140,0,.6);border:1px solid rgba(0,0,0,.4);
+}
+.poker-seat .pfinish{
+  margin-top:2px;padding:2px 6px;border-radius:6px;
+  background:rgba(220,60,60,.2);color:#ff8080;border:1px solid rgba(220,60,60,.5);
+  font-size:9px;font-weight:900;letter-spacing:.3px;
+}
+
+.poker-center{
+  position:absolute;top:48%;left:50%;transform:translate(-50%,-50%);
+  display:flex;flex-direction:column;align-items:center;gap:5px;z-index:3;width:82%;
+}
+.poker-pot{
+  display:inline-flex;align-items:center;gap:6px;padding:5px 14px;border-radius:999px;
+  background:linear-gradient(135deg,rgba(255,180,60,.2),rgba(255,136,0,.12));
+  border:1px solid var(--border-strong);color:var(--gold);
+  font-size:13px;font-weight:900;letter-spacing:.4px;
+  box-shadow:0 0 18px rgba(255,180,60,.4);
+}
+.poker-sidepots{display:flex;flex-wrap:wrap;gap:5px;justify-content:center;}
+.poker-sidepots .sp{
+  font-size:10px;font-weight:800;color:#ffb366;padding:2px 8px;border-radius:999px;
+  background:rgba(255,136,0,.15);border:1px solid rgba(255,136,0,.45);
+}
+.poker-community{display:flex;gap:5px;justify-content:center;margin-top:2px;}
+.poker-community .card{
+  width:40px;height:56px;border-radius:7px;background:#fff;color:#111;
+  display:flex;flex-direction:column;justify-content:space-between;align-items:center;
+  padding:3px;font-weight:900;font-size:14px;box-shadow:0 4px 10px rgba(0,0,0,.8);
+  animation:dealCard .35s ease-out;
+}
+.poker-community .card.red{color:#dc143c;}
+.poker-community .card .r{font-size:15px;line-height:1;}
+.poker-community .card .s{font-size:14px;line-height:1;}
+.poker-community .card.empty{background:rgba(0,0,0,.3);border:1px dashed rgba(255,180,60,.3);box-shadow:none;animation:none;}
+@keyframes dealCard{from{transform:translateY(-40px) rotate(-15deg);opacity:0;}to{transform:none;opacity:1;}}
+.poker-phase{margin-top:3px;font-size:10px;font-weight:900;color:var(--gold-3);text-transform:uppercase;letter-spacing:2px;opacity:.85;}
+
+.poker-myzone{margin:0 auto;max-width:560px;width:100%;padding:0 8px;display:flex;flex-direction:column;align-items:center;gap:4px;position:relative;z-index:6;}
+.poker-myzone .my-cards{display:flex;gap:8px;justify-content:center;margin-top:-24px;}
+.poker-myzone .my-cards .card{
+  width:60px;height:84px;border-radius:10px;background:#fff;color:#111;
+  display:flex;flex-direction:column;justify-content:space-between;align-items:center;
+  padding:5px;font-weight:900;font-size:19px;box-shadow:0 6px 16px rgba(0,0,0,.85);
+  border:2px solid var(--gold-3);
+}
+.poker-myzone .my-cards .card.red{color:#dc143c;}
+.poker-myzone .my-cards .card .r{font-size:21px;}
+.poker-myzone .my-cards .card .s{font-size:18px;align-self:flex-end;}
+.poker-myzone .hand-name{
+  font-size:12px;font-weight:900;color:var(--gold);
+  text-shadow:0 0 12px rgba(255,180,60,.6);letter-spacing:.4px;
+  padding:3px 12px;border-radius:999px;
+  background:rgba(255,180,60,.08);border:1px solid var(--border-strong);
+}
+.poker-myzone .hand-name.muted{color:var(--text-muted);background:none;border-color:rgba(255,180,60,.15);}
+
+.poker-controls{max-width:560px;margin:8px auto 20px;width:100%;padding:0 8px;}
+.poker-controls .frame{
+  background:linear-gradient(180deg,#141414,#0e0e0e);
+  border:1px solid var(--border-2);border-radius:18px;padding:12px;
+  box-shadow:var(--shadow-card);display:flex;flex-direction:column;gap:10px;
+}
+
+.pre-actions{display:flex;flex-direction:column;gap:6px;}
+.pre-row{
+  display:flex;align-items:center;gap:10px;padding:10px 12px;
+  background:linear-gradient(180deg,#1a1a1a,#141414);border:1px solid var(--border);
+  border-radius:12px;font-size:12px;font-weight:800;color:#e5e5e5;cursor:pointer;
+  transition:all .15s;
+}
+.pre-row.on{border-color:#22c55e;background:linear-gradient(180deg,rgba(34,197,94,.12),rgba(34,197,94,.03));color:#6ee7a6;}
+.pre-row .cb{
+  width:20px;height:20px;border-radius:6px;border:2px solid var(--border-strong);
+  background:#0a0a0a;display:flex;align-items:center;justify-content:center;
+  font-size:13px;font-weight:900;color:transparent;flex-shrink:0;
+}
+.pre-row.on .cb{background:linear-gradient(135deg,#15803d,#22c55e);border-color:#22c55e;color:#fff;}
+
+.bet-slider-row{display:flex;align-items:center;gap:8px;}
+.bet-slider-row .stepbtn{
+  width:40px;height:40px;border-radius:11px;border:1px solid var(--border-strong);
+  background:linear-gradient(180deg,#1a1a1a,#111);color:var(--gold);
+  font-weight:900;font-size:20px;cursor:pointer;flex-shrink:0;
+}
+.bet-slider-row .stepbtn:disabled{opacity:.3;}
+.bet-slider-row .slider-wrap{flex:1;display:flex;flex-direction:column;gap:2px;}
+.bet-slider-row input[type=range]{width:100%;accent-color:var(--orange);height:6px;background:transparent;}
+.bet-slider-row .bet-val{text-align:center;font-weight:900;color:var(--gold);font-size:17px;text-shadow:0 0 10px rgba(255,180,60,.5);}
+.quick-bets{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;}
+.quick-bets button{
+  padding:10px 4px;border-radius:10px;border:1px solid var(--border-strong);
+  background:linear-gradient(180deg,#1a1a1a,#111);color:#e5e5e5;
+  font-weight:900;font-size:11px;cursor:pointer;letter-spacing:.4px;
+}
+.quick-bets button:active{transform:scale(.95);}
+.main-actions{display:grid;grid-template-columns:1fr 1.15fr 1.15fr;gap:8px;}
+.main-actions button{
+  padding:16px 6px;border-radius:14px;border:none;color:#fff;
+  font-weight:900;font-size:12px;letter-spacing:.5px;cursor:pointer;
+  min-height:56px;line-height:1.2;
+}
+.main-actions button:disabled{opacity:.35;cursor:default;}
+.main-actions .act-fold{background:linear-gradient(135deg,#8b0000,#dc2626);}
+.main-actions .act-check{background:linear-gradient(135deg,#1e40af,#3b82f6);}
+.main-actions .act-call{background:linear-gradient(135deg,#0d9488,#14b8a6);}
+.main-actions .act-bet{background:linear-gradient(135deg,#15803d,#22c55e);}
+.main-actions .act-raise{background:linear-gradient(135deg,#ea580c,#f59e0b);color:#3a1400;}
+
+.waiting-actions{text-align:center;padding:10px 8px;color:var(--text-dim);font-weight:800;font-size:13px;}
+.waiting-actions .who{color:var(--gold);font-weight:900;}
+
+.poker-utility{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;}
+.poker-utility button{
+  padding:10px;border-radius:10px;border:1px solid var(--border);
+  background:linear-gradient(180deg,#1a1a1a,#111);color:#e5e5e5;
+  font-size:11px;font-weight:900;cursor:pointer;letter-spacing:.3px;
+}
+.poker-utility button.warn{color:#ffb366;border-color:rgba(255,136,0,.5);}
+.poker-utility button.danger{color:#ff8080;border-color:rgba(220,60,60,.5);}
+.poker-utility button.active{color:#6ee7a6;border-color:rgba(34,197,94,.6);}
+
+.pk-merge-banner{
+  max-width:560px;margin:6px auto;padding:12px 14px;border-radius:14px;
+  background:linear-gradient(135deg,rgba(255,80,80,.18),rgba(200,20,20,.1));
+  border:1px solid rgba(255,80,80,.55);color:#ffb0b0;
+  font-size:12px;font-weight:900;text-align:center;letter-spacing:.4px;
+  box-shadow:0 0 20px rgba(255,80,80,.35);
+  animation:mergeBlink 1.2s infinite;
+}
+@keyframes mergeBlink{0%,100%{opacity:1;}50%{opacity:.75;}}
+.pk-merge-banner .big{font-size:16px;color:#ff8080;display:block;margin-bottom:2px;}
+</style>
+</head>
+<body>
+<div id="app">
+  <header id="topbar">
+    <div id="title"><span class="ic">🏆</span><span id="title-text">Турнир</span></div>
+    <div id="admin-toolbar" class="hidden">
+      <button id="ad-kick" class="btn-top warn">🚫 Кик</button>
+      <button id="ad-end" class="btn-top warn">🏁 Закончить</button>
+    </div>
+    <button id="room-exit-btn" class="btn-top gold hidden">🚪 Покинуть</button>
+    <button id="leave-btn" class="btn-top danger hidden">🚪 Выйти</button>
+    <div id="status" class="status">Онлайн</div>
+  </header>
+
+  <div id="tabs" class="tabs">
+    <div class="tab active" data-tab="profile">👤 Профиль</div>
+    <div class="tab" data-tab="tournaments">🏆 Турниры</div>
+  </div>
+
+  <div id="room-tabs" class="tabs hidden" style="border-top:1px solid var(--border);">
+    <div class="tab active" data-rtab="bracket">🏆 Сетка</div>
+    <div class="tab" data-rtab="main">🎮 Комната</div>
+  </div>
+
+  <main id="profile-view" class="view">
+    <div class="pf-wrap">
+      <div class="profile-hero">
+        <div class="avatar-wrap">
+          <div class="crown-sparkles"></div>
+          <div class="crown">👑</div>
+          <div class="avatar-circle">
+            <svg viewBox="0 0 100 100" fill="none">
+              <circle cx="50" cy="40" r="13" fill="#3b82f6"/>
+              <path d="M22 78 Q22 55 50 55 Q78 55 78 78 Z" fill="#3b82f6"/>
+            </svg>
+          </div>
+        </div>
+        <div class="pf-name" id="pf-name">—</div>
+        <div class="pf-uname" id="pf-uname"></div>
+        <div class="pf-role" id="pf-role">🎮 Игрок</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-left"><span class="ic">🏆</span><span>Побед</span></div>
+        <div class="stat-right">
+          <span class="stat-laurel">🌿</span>
+          <span class="stat-value" id="pf-wins">0</span>
+          <span class="stat-laurel" style="transform:scaleX(-1);">🌿</span>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <main id="tournaments-view" class="view hidden">
+    <div class="tr-list" id="tr-list"><div class="empty">Загрузка…</div></div>
+  </main>
+
+  <main id="room-view" class="view hidden">
+    <div class="room-head">
+      <div class="room-head-badges">
+        <div class="room-badge gold"><span class="ic">🏆</span><span id="rm-badge-1">1</span></div>
+        <div class="room-badge"><span class="ic">👥</span><span id="rm-counter">Игроков: 0</span></div>
+      </div>
+      <div class="room-title" id="rm-title-wrap"><span>🎮</span><span id="rm-title-extra"></span></div>
+      <div class="room-head-sep"></div>
+    </div>
+    <div id="room-content"></div>
+    <div id="bracket-content" class="hidden"></div>
+  </main>
+
+  <div id="modal" class="modal hidden"><div class="modal-card">
+    <div id="modal-title"></div><div id="modal-body"></div>
+    <div class="modal-btns" id="modal-btns"></div>
+  </div></div>
+  <canvas id="confetti" class="confetti hidden"></canvas>
+</div>
+<script>
+const tg = window.Telegram?.WebApp;
+tg?.ready(); tg?.expand?.();
+const INIT_DATA = tg?.initData || "";
+const els = {
+  title: document.getElementById("title"),
+  titleText: document.getElementById("title-text"),
+  status: document.getElementById("status"),
+  tabs: document.getElementById("tabs"), roomTabs: document.getElementById("room-tabs"),
+  profileView: document.getElementById("profile-view"),
+  tournamentsView: document.getElementById("tournaments-view"),
+  roomView: document.getElementById("room-view"),
+  roomContent: document.getElementById("room-content"),
+  bracketContent: document.getElementById("bracket-content"),
+  trList: document.getElementById("tr-list"),
+  pfName: document.getElementById("pf-name"), pfUname: document.getElementById("pf-uname"),
+  pfRole: document.getElementById("pf-role"), pfWins: document.getElementById("pf-wins"),
+  rmBadge1: document.getElementById("rm-badge-1"),
+  rmCounter: document.getElementById("rm-counter"),
+  rmTitleExtra: document.getElementById("rm-title-extra"),
+  leaveBtn: document.getElementById("leave-btn"),
+  roomExitBtn: document.getElementById("room-exit-btn"),
+  adminToolbar: document.getElementById("admin-toolbar"),
+  adKick: document.getElementById("ad-kick"), adEnd: document.getElementById("ad-end"),
+  modal: document.getElementById("modal"), modalTitle: document.getElementById("modal-title"),
+  modalBody: document.getElementById("modal-body"), modalBtns: document.getElementById("modal-btns"),
+  confetti: document.getElementById("confetti"),
+};
+let MY_ID=null, IS_ADMIN=false, WS=null, ACTIVE_TID=null;
+let GAME_TYPE=null, LAST_STATE=null;
+let MY_WINS=0;
+let WHEEL_ANGLE=0, WHEEL_LOCK=false, WHEEL_NEXT=null, WHEEL_LAST_SPIN_SHOWN=0, WHEEL_INITIAL_DONE=false;
+let AUTO_SPIN=false, AUTO_TIMER=null, EXIT_TIMER=null;
+let PENDING_ENDED=null, SERVER_OFFSET=0, MY_READY=false;
+let ACTIVE_ROOM_TAB="bracket";
+let BRACKET_ACTIVE_MATCH_ID=null, BRACKET_MY_MATCH_ID=null;
+let BRACKET_MATCH_VIEW_STATE={}, BRACKET_MATCH_VIEW_TIMER={}, BRACKET_MATCH_VIEW_ANIM={};
+let BRACKET_MATCH_LAST_SPIN_SHOWN={};
+let BRACKET_MATCH_VIEW_STATE_TS={};
+let WCACHE={key:"",halo:null,sectors:null,hub:null,size:0};
+let W1V1_VIEW_STATE="idle", W1V1_LAST_SHOWN=0, W1V1_TIMER=null, W1V1_ANIM=null;
+
+/* ============ POKER state ============ */
+let PK_VIEW = "lobby";
+let PK_LOBBY_TAB = "tables";
+let PK_TABLE_ID = null;
+let PK_LAST_LOBBY = null;
+let PK_CUR_BET = 0, PK_MIN = 0, PK_MAX = 0;
+let PK_PRE = {check_fold:false, call_any:false};
+let PK_MERGE_UNTIL_MS = 0;
+let PK_MERGE_MODAL_SHOWN = false;
+let PK_UNSEATED_DEADLINE_MS = 0;
+
+function show(el){el.classList.remove("hidden");}
+function hide(el){el.classList.add("hidden");}
+function setStatus(t,c){els.status.textContent=t; els.status.className="status "+(c||"");}
+function escapeHtml(s){return String(s||"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));}
+function stopAutoSpin(){AUTO_SPIN=false; if(AUTO_TIMER){clearTimeout(AUTO_TIMER);AUTO_TIMER=null;}}
+function clearExitTimer(){if(EXIT_TIMER){clearTimeout(EXIT_TIMER);EXIT_TIMER=null;}}
+function syncServerTime(s){if(s&&s.server_now){SERVER_OFFSET=s.server_now-Date.now();}}
+function nowServer(){return Date.now()+SERVER_OFFSET;}
+const SPIN_TURNS_MIN=9, SPIN_TURNS_MAX=13;
+const SPIN_EASING = k => 1 - Math.pow(1-k, 4);
+function pickSpinTurns(){return SPIN_TURNS_MIN+Math.floor(Math.random()*(SPIN_TURNS_MAX-SPIN_TURNS_MIN+1));}
+
+function setBracketViewState(mid, val){
+  BRACKET_MATCH_VIEW_STATE[mid] = val;
+  BRACKET_MATCH_VIEW_STATE_TS[mid] = Date.now();
+}
+function clearBracketViewState(mid){
+  BRACKET_MATCH_VIEW_STATE[mid] = null;
+  BRACKET_MATCH_VIEW_STATE_TS[mid] = 0;
+}
+function cancelBracketAnim(mid){
+  if(BRACKET_MATCH_VIEW_ANIM[mid]){
+    try{ cancelAnimationFrame(BRACKET_MATCH_VIEW_ANIM[mid]); }catch(e){}
+    BRACKET_MATCH_VIEW_ANIM[mid] = null;
+  }
+}
+function ensureWheelCanvasInRoom(){ return !!document.getElementById("wheel"); }
+
+document.querySelectorAll("#tabs .tab").forEach(t=>{
+  t.addEventListener("click",()=>{
+    if(ACTIVE_TID) return;
+    document.querySelectorAll("#tabs .tab").forEach(x=>x.classList.remove("active"));
+    t.classList.add("active");
+    hide(els.profileView); hide(els.tournamentsView);
+    if(t.dataset.tab==="profile") show(els.profileView);
+    else {show(els.tournamentsView); loadTournaments();}
+  });
+});
+document.querySelectorAll("#room-tabs .tab").forEach(t=>{
+  t.addEventListener("click",()=>{
+    ACTIVE_ROOM_TAB = t.dataset.rtab;
+    document.querySelectorAll("#room-tabs .tab").forEach(x=>x.classList.remove("active"));
+    t.classList.add("active");
+    if(ACTIVE_ROOM_TAB === "bracket"){
+      hide(els.roomContent); show(els.bracketContent);
+      if(LAST_STATE && LAST_STATE.type === "bracket_state") drawBracketUI(LAST_STATE);
+    } else {
+      hide(els.bracketContent); show(els.roomContent);
+      if(LAST_STATE && LAST_STATE.type === "bracket_state"){
+        if(BRACKET_ACTIVE_MATCH_ID) renderBracketRoom(LAST_STATE, BRACKET_ACTIVE_MATCH_ID);
+        else drawBracketRoomsList(LAST_STATE);
+      }
+    }
+  });
+});
+
+(async function boot(){
+  if(!INIT_DATA){setStatus("Нет данных","err");return;}
+  await loadProfile();
+  setStatus("Онлайн","ok");
+})();
+
+setInterval(()=>{
+  if(!ACTIVE_TID || GAME_TYPE !== "bracket") return;
+  const mid = BRACKET_ACTIVE_MATCH_ID;
+  if(!mid) return;
+  const state = BRACKET_MATCH_VIEW_STATE[mid];
+  const ts = BRACKET_MATCH_VIEW_STATE_TS[mid] || 0;
+  const elapsed = Date.now() - ts;
+  if(state === "spinning" && elapsed > 30000){
+    cancelBracketAnim(mid); clearBracketViewState(mid);
+    if(LAST_STATE) renderBracketRoom(LAST_STATE, mid);
+  } else if(state === "showing_result" && elapsed > 6000){
+    clearBracketViewState(mid);
+    if(LAST_STATE) renderBracketRoom(LAST_STATE, mid);
+  } else if(state === "spinning" && !BRACKET_MATCH_VIEW_ANIM[mid] && elapsed > 2000){
+    clearBracketViewState(mid);
+    if(LAST_STATE) renderBracketRoom(LAST_STATE, mid);
+  }
+}, 1500);
+
+setInterval(()=>{
+  if(!ACTIVE_TID || GAME_TYPE !== "bracket") return;
+  const mid = BRACKET_ACTIVE_MATCH_ID;
+  if(!mid) return;
+  const state = BRACKET_MATCH_VIEW_STATE[mid];
+  if(state === "spinning" || state === "showing_result") return;
+  if(WS && WS.readyState === 1){ try{ wsSend({type:"request_state"}); }catch(e){} }
+}, 3000);
+
+/* Timer update для покерного стола */
+setInterval(()=>{
+  if(!ACTIVE_TID || GAME_TYPE !== "poker") return;
+  if(PK_VIEW !== "table") return;
+  const s = LAST_STATE;
+  if(!s || s.type !== "poker_state") return;
+  if(s.turn_idx < 0 || !s.turn_deadline) return;
+  const total = s.turn_time || 20;
+  const rem = Math.max(0, s.turn_deadline - (Date.now()/1000));
+  const activeIdx = s.turn_idx;
+  document.querySelectorAll(".poker-seat").forEach(seat=>{
+    const idx = parseInt(seat.dataset.idx, 10);
+    const ring = seat.querySelector(".poker-timer-ring");
+    if(!ring) return;
+    if(idx === activeIdx){
+      const frac = Math.min(1, Math.max(0, rem / total));
+      const C = 2 * Math.PI * 45;
+      ring.style.strokeDasharray = C;
+      ring.style.strokeDashoffset = C * (1 - frac);
+      ring.classList.toggle("warn", rem <= total*0.4 && rem > 5);
+      ring.classList.toggle("danger", rem <= 5);
+    } else {
+      ring.style.strokeDashoffset = 2 * Math.PI * 45;
+      ring.classList.remove("warn","danger");
+    }
+  });
+}, 250);
+
+/* Merge warning countdown */
+setInterval(()=>{
+  if(!ACTIVE_TID || GAME_TYPE !== "poker") return;
+  const now = Date.now();
+  if(PK_MERGE_UNTIL_MS && now >= PK_MERGE_UNTIL_MS) PK_MERGE_UNTIL_MS = 0;
+  const banner = document.getElementById("pk-merge-banner");
+  if(banner && PK_MERGE_UNTIL_MS){
+    const rem = Math.max(0, Math.ceil((PK_MERGE_UNTIL_MS - now)/1000));
+    const cd = banner.querySelector(".cd");
+    if(cd) cd.textContent = rem;
+  }
+}, 250);
+
+/* Lobby unseated countdown */
+setInterval(()=>{
+  if(!ACTIVE_TID || GAME_TYPE !== "poker") return;
+  if(PK_VIEW !== "lobby") return;
+  if(!PK_UNSEATED_DEADLINE_MS) return;
+  const now = Date.now();
+  const rem = Math.max(0, Math.ceil((PK_UNSEATED_DEADLINE_MS - now)/1000));
+  const cd = document.getElementById("pk-unseated-cd");
+  if(cd) cd.textContent = rem;
+  if(rem <= 0) PK_UNSEATED_DEADLINE_MS = 0;
+}, 500);
+
+async function loadProfile(){
+  try{
+    const r = await fetch(`/api/profile?initData=${encodeURIComponent(INIT_DATA)}`);
+    if(!r.ok) throw new Error(await r.text());
+    const p = await r.json();
+    MY_ID = p.user_id; IS_ADMIN = p.is_admin; MY_WINS = p.wins || 0;
+    els.pfName.textContent = p.first_name || "Игрок";
+    els.pfUname.textContent = p.username ? "@"+p.username : "";
+    els.pfWins.textContent = MY_WINS;
+    els.pfRole.textContent = IS_ADMIN ? "🛠 Администратор" : "🎮 Игрок";
+    els.pfRole.classList.toggle("player", !IS_ADMIN);
+    els.rmBadge1.textContent = MY_WINS;
+  }catch(e){console.error(e);}
+}
+
+async function loadTournaments(){
+  els.trList.innerHTML = '<div class="empty">Загрузка…</div>';
+  try{
+    const r = await fetch(`/api/profile?initData=${encodeURIComponent(INIT_DATA)}`);
+    const p = await r.json();
+    const tours = p.tournaments || [];
+    if(!tours.length){els.trList.innerHTML = '<div class="empty">📭 Нет активных турниров</div>';return;}
+    els.trList.innerHTML = "";
+    tours.forEach(t=>{
+      const emoji = t.game_type === "poker" ? "🃏" : (t.game_type === "wheel_1v1" ? "⚔️" : (t.game_type === "bracket" ? "🏆" : "🎡"));
+      const gameName = t.game_type === "poker" ? "Покер"
+        : (t.game_type === "wheel_1v1" ? "Колесо 1×1"
+        : (t.game_type === "bracket" ? "Турнир" : "Колесо Фортуны"));
+      let canStart = t.status === "running" || t.status === "paused";
+      let btnLabel = canStart ? "🎮 НАЧАТЬ" : (t.status === "registration" ? "⏳ Ожидание" : "🏁 Завершён");
+      let disabled = !canStart;
+      if(t.game_type === "wheel_1v1"){
+        if(t.my_status === "pending"){btnLabel = "⏳ Ждём подтверждения";disabled = true;}
+        else if(t.status === "registration"){btnLabel = "⏳ Ждём второго";disabled = true;}
+      }
+      if(t.game_type === "bracket"){
+        if(t.my_status === "pending"){btnLabel = "⏳ Ждём подтверждения";disabled = true;}
+        else if(t.status === "registration"){btnLabel = "⏳ Ждём игроков";disabled = true;}
+        else if(t.my_status === "kicked" || t.my_status === "left"){btnLabel = "👁 СМОТРЕТЬ";disabled = false;canStart = true;}
+      }
+      if(t.game_type === "poker"){
+        if(t.my_status === "pending"){btnLabel = "⏳ Ждём подтверждения";disabled = true;}
+        else if(t.status === "registration"){btnLabel = "⏳ Ждём игроков";disabled = true;}
+      }
+      let badge = "";
+      if(t.my_status === "admin") badge = '<span style="color:#ffcc00;font-weight:900;font-size:11px;">👑 АДМИН</span>';
+      else if(t.my_status === "creator") badge = '<span style="color:#ff8800;font-weight:900;font-size:11px;">🎨 СОЗДАТЕЛЬ</span>';
+      else if(t.my_status === "pending") badge = '<span style="color:#ffa500;font-weight:900;font-size:11px;">📩 ПРИГЛАШЕНИЕ</span>';
+      else if(t.my_status === "kicked") badge = '<span style="color:#ff6b6b;font-weight:900;font-size:11px;">🚫 ИСКЛЮЧЁН</span>';
+      else if(t.my_status === "left") badge = '<span style="color:#ff6b6b;font-weight:900;font-size:11px;">🚪 ВЫШЕЛ</span>';
+      const card = document.createElement("div");
+      card.className = "tr-card";
+      card.innerHTML = `
+        <div class="hdr"><div class="name">${escapeHtml(t.name)}</div><div class="emoji">${emoji}</div></div>
+        <div class="meta">
+          <span>Игра: <b>${gameName}</b></span>
+          <span>Статус: <b>${t.display_status || t.status}</b></span>
+          ${badge}
+        </div>
+        ${t.prize ? `<div class="meta">🎁 Приз: <b>${escapeHtml(t.prize)}</b></div>` : ""}
+        <button class="btn-start" ${disabled?"disabled":""}>${btnLabel}</button>`;
+      card.querySelector(".btn-start").addEventListener("click",()=>{if(canStart) openRoom(t.tid);});
+      els.trList.appendChild(card);
+    });
+  }catch(e){els.trList.innerHTML = '<div class="empty">Ошибка: '+escapeHtml(e.message)+'</div>';}
+}
+
+async function openRoom(tid){
+  try{
+    const r = await fetch(`/api/tournament/${tid}?initData=${encodeURIComponent(INIT_DATA)}`);
+    if(!r.ok){
+      const e = await r.json().catch(()=>({detail:"Ошибка"}));
+      showModal("⚠ Ошибка", e.detail || "Не удалось войти", []); return;
+    }
+    const info = await r.json();
+    GAME_TYPE = info.game_type; ACTIVE_TID = tid;
+    IS_ADMIN = info.is_admin;
+    WHEEL_LOCK=false; WHEEL_NEXT=null; WHEEL_LAST_SPIN_SHOWN=0;
+    WHEEL_INITIAL_DONE=false; WHEEL_ANGLE=0;
+    PENDING_ENDED=null; MY_READY=false;
+    BRACKET_ACTIVE_MATCH_ID=null; BRACKET_MY_MATCH_ID=null;
+    BRACKET_MATCH_VIEW_STATE={}; BRACKET_MATCH_VIEW_TIMER={};
+    BRACKET_MATCH_VIEW_ANIM={}; BRACKET_MATCH_LAST_SPIN_SHOWN={};
+    BRACKET_MATCH_VIEW_STATE_TS={};
+    WCACHE={key:"",halo:null,sectors:null,hub:null,size:0};
+    W1V1_VIEW_STATE="idle"; W1V1_LAST_SHOWN=0;
+    if(W1V1_TIMER){clearTimeout(W1V1_TIMER);W1V1_TIMER=null;}
+    if(W1V1_ANIM){try{cancelAnimationFrame(W1V1_ANIM);}catch(e){} W1V1_ANIM=null;}
+    /* reset poker locals */
+    PK_VIEW = (info.game_type === "poker") ? "lobby" : "table";
+    PK_LOBBY_TAB = "tables";
+    PK_TABLE_ID = null; PK_LAST_LOBBY = null;
+    PK_CUR_BET=0; PK_MIN=0; PK_MAX=0;
+    PK_PRE={check_fold:false, call_any:false};
+    PK_MERGE_UNTIL_MS=0; PK_MERGE_MODAL_SHOWN=false;
+    PK_UNSEATED_DEADLINE_MS=0;
+    ACTIVE_ROOM_TAB = (info.game_type === "bracket") ? "bracket" : "main";
+    hide(els.tabs); hide(els.profileView); hide(els.tournamentsView);
+    show(els.roomView);
+    els.titleText.textContent = info.name;
+    els.rmTitleExtra.textContent = info.name;
+    els.roomExitBtn.classList.add("hidden");
+    show(els.leaveBtn);
+    if(IS_ADMIN) show(els.adminToolbar); else hide(els.adminToolbar);
+    if(info.game_type === "bracket"){
+      show(els.roomTabs);
+      document.querySelectorAll("#room-tabs .tab").forEach(x=>x.classList.remove("active"));
+      document.querySelector('#room-tabs .tab[data-rtab="bracket"]').classList.add("active");
+      hide(els.roomContent); show(els.bracketContent);
+    } else {
+      hide(els.roomTabs);
+      show(els.roomContent); hide(els.bracketContent);
+    }
+    connectWS(tid);
+  }catch(e){showModal("⚠ Ошибка", e.message, []);}
+}
+
+function exitRoom(){
+  stopAutoSpin(); clearExitTimer();
+  for(const mid in BRACKET_MATCH_VIEW_TIMER){try{clearTimeout(BRACKET_MATCH_VIEW_TIMER[mid]);}catch(e){}}
+  for(const mid in BRACKET_MATCH_VIEW_ANIM){cancelBracketAnim(mid);}
+  if(W1V1_TIMER){clearTimeout(W1V1_TIMER);W1V1_TIMER=null;}
+  if(W1V1_ANIM){try{cancelAnimationFrame(W1V1_ANIM);}catch(e){} W1V1_ANIM=null;}
+  BRACKET_MATCH_VIEW_TIMER={}; BRACKET_MATCH_VIEW_ANIM={}; BRACKET_MATCH_VIEW_STATE={};
+  BRACKET_MATCH_LAST_SPIN_SHOWN={}; BRACKET_MATCH_VIEW_STATE_TS={};
+  WCACHE={key:"",halo:null,sectors:null,hub:null,size:0};
+  PENDING_ENDED=null; WHEEL_NEXT=null; WHEEL_LOCK=false;
+  MY_READY=false; BRACKET_ACTIVE_MATCH_ID=null; BRACKET_MY_MATCH_ID=null;
+  ACTIVE_ROOM_TAB="bracket"; W1V1_VIEW_STATE="idle"; W1V1_LAST_SHOWN=0;
+  PK_VIEW="lobby"; PK_LOBBY_TAB="tables"; PK_TABLE_ID=null; PK_LAST_LOBBY=null;
+  PK_MERGE_UNTIL_MS=0; PK_MERGE_MODAL_SHOWN=false; PK_UNSEATED_DEADLINE_MS=0;
+  if(WS) try{WS.close();}catch(e){}
+  WS=null; ACTIVE_TID=null; GAME_TYPE=null; LAST_STATE=null;
+  hide(els.roomView); hide(els.leaveBtn); hide(els.roomExitBtn); hide(els.adminToolbar); hide(els.roomTabs);
+  hide(els.modal); hide(els.confetti);
+  els.titleText.textContent = "Турнир";
+  show(els.tabs);
+  document.querySelectorAll("#tabs .tab").forEach(x=>x.classList.remove("active"));
+  document.querySelector('#tabs .tab[data-tab="tournaments"]').classList.add("active");
+  show(els.tournamentsView);
+  loadTournaments(); loadProfile();
+}
+
+function connectWS(tid){
+  if(WS) try{WS.close();}catch(e){}
+  const proto = location.protocol === "https:" ? "wss" : "ws";
+  const url = `${proto}://${location.host}/ws/${tid}?initData=${encodeURIComponent(INIT_DATA)}`;
+  WS = new WebSocket(url);
+  WS.onopen = ()=>setStatus("Онлайн","ok");
+  WS.onclose = ()=>{if(!ACTIVE_TID) return; setStatus("Оффлайн","err");
+    setTimeout(()=>{if(ACTIVE_TID) connectWS(ACTIVE_TID);},2000);};
+  WS.onerror = ()=>setStatus("Ошибка","err");
+  WS.onmessage = (ev)=>{
+    let msg;
+    try { msg = JSON.parse(ev.data); } catch(e){ console.error("bad json", ev.data); return; }
+    try {
+      if(msg.type === "poker_state"){syncServerTime(msg); renderPokerState(msg);}
+      else if(msg.type === "poker_lobby"){syncServerTime(msg); renderPokerLobby(msg);}
+      else if(msg.type === "poker_merge_warning"){handleMergeWarning(msg);}
+      else if(msg.type === "poker_sit_error"){showModal("⚠ Не удалось сесть", escapeHtml(msg.error||"Ошибка"), []);}
+      else if(msg.type === "wheel_state"){syncServerTime(msg); renderWheel(msg);}
+      else if(msg.type === "wheel_1v1_state"){syncServerTime(msg); renderWheel1v1(msg);}
+      else if(msg.type === "bracket_state"){syncServerTime(msg); renderBracket(msg);}
+      else if(msg.type === "castle_1v1_ready" || msg.type === "wheel_1v1_ready"){}
+      else if(msg.type === "not_ready"){showModal("⏳ Не готово","Оба игрока должны нажать «Готов».",[]);}
+      else if(msg.type === "spin_denied"){showModal("⛔ Нет доступа","Крутить может только администратор.",[]);}
+      else if(msg.type === "left_tournament"){
+        stopAutoSpin(); showModal("🚪 Вы вышли","Возврат в меню...",[]);
+        clearExitTimer(); EXIT_TIMER = setTimeout(()=>exitRoom(), 3000);}
+      else if(msg.type === "player_kicked" && msg.user_id === MY_ID){
+        stopAutoSpin(); showModal("🚫 Исключение","Администратор удалил вас.",[]);
+        if(GAME_TYPE !== "bracket" && GAME_TYPE !== "poker"){clearExitTimer(); EXIT_TIMER = setTimeout(()=>exitRoom(), 5000);}}
+      else if(msg.type === "tournament_ended"){handleTournamentEnded(msg);}
+      else if(msg.type === "tournament_cancelled"){
+        stopAutoSpin(); showModal("🛑 Отменён","Турнир отменён.",[]);
+        clearExitTimer(); EXIT_TIMER = setTimeout(()=>exitRoom(), 5000);}
+      else if(msg.type === "final_table"){
+        showModal("🎯 ФИНАЛЬНЫЙ СТОЛ","Все игроки собраны за одним столом!",[]);
+        setTimeout(()=>hide(els.modal), 3000);}
+    } catch(e){ console.error("handler error", e); }
+  };
+}
+function wsSend(o){if(WS && WS.readyState === 1) WS.send(JSON.stringify(o));}
+
+function handleTournamentEnded(msg){
+  if((GAME_TYPE === 'wheel' || GAME_TYPE === 'wheel_1v1') && WHEEL_LOCK){PENDING_ENDED = msg; return;}
+  _showEndedModal(msg);
+}
+function _showEndedModal(msg){
+  const manual = !!msg.manual, winnerId = msg.winner_id, winnerName = msg.winner_name;
+  let title, body, countdown;
+  if(manual){title="🏁 Турнир завершён";body="Администратор остановил турнир.<br>Победитель не определён.";countdown=5;}
+  else if(winnerId){
+    if(winnerId === MY_ID){title="🏆 ПОБЕДА!";body=`Вы победили!<br><b>${escapeHtml(winnerName||"")}</b>`;}
+    else {title="🏁 Турнир завершён";body=`🥇 Победитель: <b>${escapeHtml(winnerName||"—")}</b>`;}
+    countdown=15; fireConfetti();
+  } else {title="🏁 Турнир завершён";body="Победитель не определён.";countdown=5;}
+  let remaining = countdown;
+  els.modalTitle.textContent = title;
+  els.modalBody.innerHTML = body + `<div class="countdown-text" id="cd">Возврат в меню через ${remaining}…</div>`;
+  els.modalBtns.innerHTML = `<button class="btn" id="mc">Закрыть сейчас</button>`;
+  document.getElementById("mc").onclick = ()=>{clearExitTimer(); exitRoom();};
+  show(els.modal);
+  const tick = setInterval(()=>{
+    remaining--;
+    const cdel = document.getElementById("cd");
+    if(cdel) cdel.textContent = `Возврат в меню через ${remaining}…`;
+    if(remaining <= 0){clearInterval(tick); exitRoom();}
+  }, 1000);
+  clearExitTimer();
+  EXIT_TIMER = setTimeout(()=>{clearInterval(tick); exitRoom();}, countdown*1000 + 200);
+}
+els.roomExitBtn.addEventListener("click", ()=>{
+  if(GAME_TYPE === "poker"){
+    PK_VIEW = "lobby"; PK_TABLE_ID = null;
+    wsSend({type:"request_lobby"});
+    els.roomExitBtn.classList.add("hidden");
+    return;
+  }
+  closeBracketRoom();
+});
+
+/* ================== BRACKET ================== */
+function renderBracket(s){
+  LAST_STATE = s;
+  if(BRACKET_ACTIVE_MATCH_ID){
+    if(ACTIVE_ROOM_TAB === "bracket") drawBracketUI(s);
+    else renderBracketRoom(s, BRACKET_ACTIVE_MATCH_ID);
+  } else {
+    if(ACTIVE_ROOM_TAB === "bracket") drawBracketUI(s);
+    else drawBracketRoomsList(s);
+  }
+}
+function findMatch(s, match_id){
+  if(!s || !s.rounds) return null;
+  for(const rnd of s.rounds) for(const m of rnd) if(m.match_id === match_id) return m;
+  return null;
+}
+function findMyActiveMatch(s){
+  if(!s || !s.rounds) return null;
+  for(const rnd of s.rounds) for(const m of rnd){
+    if(m.finished) continue;
+    if(m.p1 && m.p1.user_id === MY_ID) return m;
+    if(m.p2 && m.p2.user_id === MY_ID) return m;
+  }
+  return null;
+}
+function getRoundNames(total){
+  if(total === 1) return ["ФИНАЛ"];
+  if(total === 2) return ["1/2","ФИНАЛ"];
+  if(total === 3) return ["1/4","1/2","ФИНАЛ"];
+  if(total === 4) return ["1/8","1/4","1/2","ФИНАЛ"];
+  if(total === 5) return ["1/16","1/8","1/4","1/2","ФИНАЛ"];
+  if(total === 6) return ["1/32","1/16","1/8","1/4","1/2","ФИНАЛ"];
+  return Array.from({length:total},(_,i)=>`Раунд ${i+1}`);
+}
+function renderScorePanel(m){
+  if(!m) return "";
+  const p1Name = m.p1?.name || "—";
+  const p2Name = m.p2?.name || "—";
+  const p1w = m.p1_wins || 0, p2w = m.p2_wins || 0;
+  const target = m.series_target || 3;
+  const roundIdx = m.round_num !== undefined ? m.round_num : 0;
+  const roundNames = LAST_STATE ? getRoundNames(LAST_STATE.rounds.length) : [];
+  const roundName = roundNames[roundIdx] || ("Раунд " + (roundIdx+1));
+  const iAmP1 = m.p1 && m.p1.user_id === MY_ID;
+  const iAmP2 = m.p2 && m.p2.user_id === MY_ID;
+  const p1RoomReady = (m.room_ready || []).includes(m.p1?.user_id);
+  const p2RoomReady = (m.room_ready || []).includes(m.p2?.user_id);
+  return `
+    <div class="score-panel"><div class="score-frame">
+      <div class="score-player">
+        <div class="ava">${iAmP1 ? '🙋' : '👤'}</div>
+        <div class="nm">${escapeHtml(p1Name)}</div>
+        <div class="score-num">${p1w}</div>
+        <div class="tag ${p1RoomReady ? 'ready' : 'notready'}">${p1RoomReady ? '✓ готов' : 'не готов'}</div>
+      </div>
+      <div class="score-vs">
+        <div class="score-round">${escapeHtml(roundName)}</div>
+        <div class="vs-label">VS</div>
+        <div class="target">до ${target}</div>
+      </div>
+      <div class="score-player">
+        <div class="ava">${iAmP2 ? '🙋' : '👤'}</div>
+        <div class="nm">${escapeHtml(p2Name)}</div>
+        <div class="score-num">${p2w}</div>
+        <div class="tag ${p2RoomReady ? 'ready' : 'notready'}">${p2RoomReady ? '✓ готов' : 'не готов'}</div>
+      </div>
+    </div></div>`;
+}
+
+function drawBracketRoomsList(s){
+  els.rmCounter.textContent = `Комнаты · ${s.size} игроков`;
+  els.roomExitBtn.classList.add("hidden");
+  if(s.waiting || !s.rounds || !s.rounds.length){
+    els.roomContent.innerHTML = `<div class="waiting-box"><div class="waiting-ico">🎮</div><div class="waiting-txt">Ожидание участников…</div></div>`;
+    return;
+  }
+  const roundNames = getRoundNames(s.rounds.length);
+  const active = [];
+  s.rounds.forEach(rnd=>rnd.forEach(m=>{
+    if(m.finished) return;
+    if(!m.p1 || !m.p2) return;
+    const bothReady = (m.ready||[]).length >= 2;
+    if(!bothReady && !m.room_active) return;
+    active.push(m);
+  }));
+  if(!active.length){
+    els.roomContent.innerHTML = `<div class="waiting-box"><div class="waiting-ico">🎮</div><div class="waiting-txt">Пока нет активных комнат</div><div style="color:var(--text-muted);font-size:13px;">Комната появится, когда оба игрока отметятся ✓ в сетке.</div></div>`;
+    return;
+  }
+  let html = `<div class="rooms-list">`;
+  active.forEach(m=>{
+    const rn = roundNames[m.round_num] || ("Раунд " + (m.round_num+1));
+    const isMine = (m.p1 && m.p1.user_id === MY_ID) || (m.p2 && m.p2.user_id === MY_ID);
+    const roomReadyCount = (m.room_ready||[]).length;
+    let statusCls, statusTxt;
+    if(roomReadyCount >= 2){statusCls="running";statusTxt="Идёт серия";}
+    else if(roomReadyCount === 1){statusCls="waiting";statusTxt="Ждём второго";}
+    else {statusCls="idle";statusTxt="Ожидание";}
+    let btnLabel = isMine ? "🎮 Войти" : "👁 Наблюдать";
+    html += `
+      <div class="room-card">
+        <div class="rc-hdr">
+          <div class="rc-title">${escapeHtml(rn)} · матч ${m.pos_in_round+1}</div>
+          <div class="rc-status ${statusCls}">${statusTxt}</div>
+        </div>
+        <div class="rc-players">
+          <div class="rc-player-row"><span class="pname">${escapeHtml(m.p1?.name||'—')}</span><span class="pscore">${m.p1_wins||0}</span></div>
+          <div class="rc-player-row"><span class="pname">${escapeHtml(m.p2?.name||'—')}</span><span class="pscore">${m.p2_wins||0}</span></div>
+        </div>
+        <div class="rc-target">до ${m.series_target||3} побед</div>
+        <button class="bracket-enter-btn" data-enter-room="${m.match_id}">${btnLabel}</button>
+      </div>`;
+  });
+  html += `</div>`;
+  els.roomContent.innerHTML = html;
+  els.roomContent.querySelectorAll("[data-enter-room]").forEach(b=>{
+    b.addEventListener("click",()=>{
+      const mid = parseInt(b.dataset.enterRoom,10);
+      if(!mid) return;
+      openBracketRoom(mid);
+    });
+  });
+}
+
+function openBracketRoom(mid){
+  BRACKET_ACTIVE_MATCH_ID = mid;
+  clearBracketViewState(mid);
+  const mm = LAST_STATE ? findMatch(LAST_STATE, mid) : null;
+  if(mm && mm.last_spin){
+    const now = nowServer();
+    const spinEndsAt = (mm.last_spin.started_at || 0) + (mm.last_spin.duration || 20000);
+    if(now < spinEndsAt) BRACKET_MATCH_LAST_SPIN_SHOWN[mid] = (mm.spin_count || 1) - 1;
+    else BRACKET_MATCH_LAST_SPIN_SHOWN[mid] = mm.spin_count || 0;
+  } else BRACKET_MATCH_LAST_SPIN_SHOWN[mid] = 0;
+  wsSend({type:"bracket_enter", match_id: mid});
+  ACTIVE_ROOM_TAB = "main";
+  document.querySelectorAll("#room-tabs .tab").forEach(x=>x.classList.remove("active"));
+  const mainTab = document.querySelector('#room-tabs .tab[data-rtab="main"]');
+  if(mainTab) mainTab.classList.add("active");
+  hide(els.bracketContent); show(els.roomContent);
+  els.roomExitBtn.classList.remove("hidden");
+  if(LAST_STATE) renderBracketRoom(LAST_STATE, mid);
+}
+
+function closeBracketRoom(){
+  const oldMid = BRACKET_ACTIVE_MATCH_ID;
+  if(oldMid && BRACKET_MATCH_VIEW_TIMER[oldMid]){try{clearTimeout(BRACKET_MATCH_VIEW_TIMER[oldMid]);}catch(e){} BRACKET_MATCH_VIEW_TIMER[oldMid]=null;}
+  if(oldMid) cancelBracketAnim(oldMid);
+  BRACKET_ACTIVE_MATCH_ID = null;
+  BRACKET_MATCH_VIEW_STATE = {};
+  BRACKET_MATCH_VIEW_STATE_TS = {};
+  WCACHE = {key:"",halo:null,sectors:null,hub:null,size:0};
+  els.roomExitBtn.classList.add("hidden");
+  if(LAST_STATE) drawBracketRoomsList(LAST_STATE);
+}
+
+function drawBracketUI(s){
+  els.rmCounter.textContent = `Турнир · ${s.size} игроков`;
+  els.roomExitBtn.classList.add("hidden");
+  if(s.waiting || !s.rounds || !s.rounds.length){
+    els.bracketContent.innerHTML = `<div class="waiting-box"><div class="waiting-ico">🏆</div><div class="waiting-txt">Ожидание всех участников…</div></div>`;
+    return;
+  }
+  const match = findMyActiveMatch(s);
+  BRACKET_MY_MATCH_ID = match ? match.match_id : null;
+  const roundNames = getRoundNames(s.rounds.length);
+  let html = `<div class="bracket-wrap"><div class="bracket-columns">`;
+  s.rounds.forEach((rnd,rIdx)=>{
+    html += `<div class="bracket-col"><div class="bracket-col-title">${roundNames[rIdx] || ('Раунд '+(rIdx+1))}</div>`;
+    rnd.forEach(m=>{
+      const isMyMatch = (m.p1 && m.p1.user_id === MY_ID) || (m.p2 && m.p2.user_id === MY_ID);
+      const bothReady = (m.ready || []).length >= 2;
+      const cls = "bracket-match" + (m.finished ? " finished" : (isMyMatch ? " active" : ""));
+      html += `<div class="${cls}">`;
+      html += renderBracketPlayer(m, m.p1, m.ready, m.finished, m.winner, isMyMatch);
+      html += `<div class="bracket-vs">VS</div>`;
+      html += renderBracketPlayer(m, m.p2, m.ready, m.finished, m.winner, isMyMatch);
+      const canShowSpectate = !isMyMatch && m.p1 && m.p2;
+      if(isMyMatch && !m.finished && m.p1 && m.p2){
+        const roomActive = m.room_active;
+        let btnLabel = roomActive ? "🎮 Открыть" : "🎮 Войти";
+        let dis = !bothReady && !roomActive;
+        if(!bothReady && !roomActive) btnLabel = "⏳ Ждём";
+        html += `<button class="bracket-enter-btn" data-enter="${m.match_id}" ${dis?"disabled":""}>${btnLabel}</button>`;
+      } else if(IS_ADMIN && !m.finished && m.p1 && m.p2){
+        const roomActive = m.room_active;
+        let btnLabel = roomActive ? "🎮 Открыть" : "🎮 Войти";
+        let dis = !bothReady && !roomActive;
+        html += `<button class="bracket-enter-btn admin-view" data-enter="${m.match_id}" ${dis?"disabled":""}>${btnLabel}</button>`;
+      } else if(canShowSpectate){
+        let label = "👁 Смотреть";
+        if(m.finished) label = "👁 Результат";
+        html += `<button class="bracket-enter-btn spectate" data-enter="${m.match_id}">${label}</button>`;
+      }
+      html += `</div>`;
+    });
+    html += `</div>`;
+  });
+  html += `</div></div>`;
+  if(s.finished && s.winner){
+    html += `<div class="waiting-box" style="padding:24px;"><div class="waiting-ico">🏆</div><div class="waiting-txt">Победитель: <b>${escapeHtml(s.winner.name)}</b></div></div>`;
+  }
+  els.bracketContent.innerHTML = html;
+  els.bracketContent.querySelectorAll(".bracket-check").forEach(btn=>{
+    btn.addEventListener("click",()=>{
+      const mid = parseInt(btn.dataset.mid,10);
+      if(!mid || btn.disabled) return;
+      wsSend({type:"bracket_ready", match_id: mid});
+    });
+  });
+  els.bracketContent.querySelectorAll(".bracket-enter-btn").forEach(btn=>{
+    btn.addEventListener("click",()=>{
+      const mid = parseInt(btn.dataset.enter,10);
+      if(!mid || btn.disabled) return;
+      openBracketRoom(mid);
+    });
+  });
+}
+
+function renderBracketPlayer(m, p, readyList, finished, winner, isMyMatch){
+  if(!p) return `<div class="bracket-player"><div class="bp-name" style="color:#555;">—</div></div>`;
+  const isReady = (readyList || []).includes(p.user_id);
+  const isWinner = winner && winner.user_id === p.user_id;
+  const isLoser = finished && winner && winner.user_id !== p.user_id;
+  const isMe = p.user_id === MY_ID;
+  let cls = "bracket-player";
+  if(finished && isWinner) cls += " winner";
+  else if(finished && isLoser) cls += " loser";
+  let checkCls = "bracket-check", checkText = "", disabled = "disabled";
+  if(isReady){checkCls += " checked"; checkText = "✓";}
+  if(isMe && !finished && m.p1 && m.p2 && !isReady) disabled = "";
+  if(isMe && isReady) disabled = "disabled";
+  if(isMe) checkCls += " mine"; else checkCls += " notmine";
+  let scoreText = "";
+  if(m.series_target && m.series_target > 1){
+    const myWins = (p.user_id === (m.p1 && m.p1.user_id)) ? (m.p1_wins||0) : (m.p2_wins||0);
+    if(myWins > 0 || (m.p1_wins||0) > 0 || (m.p2_wins||0) > 0) scoreText = `<span class="bracket-score">${myWins}</span>`;
+  }
+  return `<div class="${cls}">
+    <div class="bp-name">${escapeHtml(p.name)}${isMe ? ' <span style="color:#ffcc00;">(вы)</span>' : ''}</div>
+    ${scoreText}
+    <button class="${checkCls}" data-mid="${m.match_id}" data-uid="${p.user_id}" ${disabled}>${checkText}</button>
+  </div>`;
+}
+
+function renderBracketRoom(s, match_id){
+  const m = findMatch(s, match_id);
+  if(!m){
+    BRACKET_ACTIVE_MATCH_ID = null;
+    clearBracketViewState(match_id);
+    els.roomExitBtn.classList.add("hidden");
+    if(ACTIVE_ROOM_TAB === "bracket") drawBracketUI(s); else drawBracketRoomsList(s);
+    return;
+  }
+  let state = BRACKET_MATCH_VIEW_STATE[match_id];
+  if(state === "spinning" && !BRACKET_MATCH_VIEW_ANIM[match_id]){
+    clearBracketViewState(match_id);
+    state = null;
+  }
+  if(state === "spinning") return;
+  if(state === "showing_result") return;
+  const lastShown = BRACKET_MATCH_LAST_SPIN_SHOWN[match_id] || 0;
+  const hasNewSpin = m.last_spin && m.spin_count > lastShown;
+  if(hasNewSpin){
+    BRACKET_MATCH_LAST_SPIN_SHOWN[match_id] = m.spin_count;
+    setBracketViewState(match_id, "spinning");
+    clearBracketTimer(match_id);
+    if(!ensureWheelCanvasInRoom()){ drawBracketRoomWaiting(s, m); }
+    animateBracketSpin(s, m, ()=>{
+      setTimeout(()=>{
+        if(BRACKET_ACTIVE_MATCH_ID !== match_id) return;
+        showMatchResult(match_id);
+      }, 1000);
+    });
+    return;
+  }
+  if(m.finished){showMatchResult(match_id); return;}
+  drawBracketRoomWaiting(s, m);
+}
+
+function clearBracketTimer(match_id){
+  if(BRACKET_MATCH_VIEW_TIMER[match_id]){try{clearTimeout(BRACKET_MATCH_VIEW_TIMER[match_id]);}catch(e){} BRACKET_MATCH_VIEW_TIMER[match_id]=null;}
+}
+
+function showMatchResult(match_id){
+  const s = LAST_STATE;
+  if(!s) return;
+  const m = findMatch(s, match_id);
+  if(!m){
+    BRACKET_ACTIVE_MATCH_ID = null;
+    clearBracketViewState(match_id);
+    els.roomExitBtn.classList.add("hidden");
+    drawBracketUI(s); return;
+  }
+  setBracketViewState(match_id, "showing_result");
+  clearBracketTimer(match_id);
+  if(m.finished){
+    drawBracketRoomFinalResult(m);
+    BRACKET_MATCH_VIEW_TIMER[match_id] = setTimeout(()=>{
+      if(BRACKET_ACTIVE_MATCH_ID !== match_id) return;
+      clearBracketViewState(match_id);
+      BRACKET_ACTIVE_MATCH_ID = null;
+      WCACHE = {key:"",halo:null,sectors:null,hub:null,size:0};
+      ACTIVE_ROOM_TAB = "bracket";
+      document.querySelectorAll("#room-tabs .tab").forEach(x=>x.classList.remove("active"));
+      const bt = document.querySelector('#room-tabs .tab[data-rtab="bracket"]');
+      if(bt) bt.classList.add("active");
+      hide(els.roomContent); show(els.bracketContent);
+      els.roomExitBtn.classList.add("hidden");
+      if(LAST_STATE) drawBracketUI(LAST_STATE);
+    }, 7000);
+  } else {
+    drawBracketRoomRoundResult(m);
+    BRACKET_MATCH_VIEW_TIMER[match_id] = setTimeout(()=>{
+      if(BRACKET_ACTIVE_MATCH_ID !== match_id) return;
+      clearBracketViewState(match_id);
+      if(LAST_STATE) renderBracketRoom(LAST_STATE, match_id);
+    }, 3500);
+  }
+}
+
+function drawBracketRoomWaiting(s, m){
+  const p1 = m.p1, p2 = m.p2;
+  const iAmPlayer = (p1 && p1.user_id === MY_ID) || (p2 && p2.user_id === MY_ID);
+  const myRoomReady = m.room_ready && m.room_ready.includes(MY_ID);
+  const p1RoomReady = (m.room_ready || []).includes(p1?.user_id);
+  const p2RoomReady = (m.room_ready || []).includes(p2?.user_id);
+  const bothReady = p1RoomReady && p2RoomReady;
+  const roundIdx = m.round_num;
+  const roundNames = getRoundNames(s.rounds.length);
+  const roundName = roundNames[roundIdx] || ("Раунд " + (roundIdx+1));
+  els.rmCounter.textContent = `${roundName} · матч ${m.pos_in_round+1}`;
+  const scoreHtml = renderScorePanel(m);
+  const wheelCaption = `<div class="wheel-caption"><span class="ic">🎡</span><span>${bothReady ? "Серия идёт" : (p1RoomReady && p2RoomReady ? "Крутится" : "2 на колесе")}</span></div>`;
+  const wheelHtml = `
+    <div class="wheel-arena">
+      ${wheelCaption}
+      <div class="wheel-frame"><div class="wheel-frame-inner">
+        <div class="pointer"></div>
+        <canvas id="wheel" width="640" height="640"></canvas>
+      </div></div>
+    </div>`;
+  let bottomHtml = "";
+  if(iAmPlayer){
+    bottomHtml += `<div class="bottom-title">Управление</div>`;
+    if(!myRoomReady){
+      bottomHtml += `<div class="ready-btn"><button id="bracket-room-ready">🤝 ГОТОВ</button></div>`;
+      bottomHtml += `<div class="bottom-info muted">${bothReady ? "Колесо крутится…" : "Оба игрока должны нажать «Готов»"}</div>`;
+    } else {
+      bottomHtml += `<div class="ready-btn"><button class="pressed" disabled>✅ ЖДЁМ СЕРИЮ</button></div>`;
+      bottomHtml += `<div class="bottom-info">${bothReady ? "🎲 Серия идёт…" : "Ждём второго игрока"}</div>`;
+    }
+  } else {
+    bottomHtml += `<div class="bottom-title">Наблюдение</div>`;
+    bottomHtml += `<div class="bottom-info">👁 Вы наблюдаете</div>`;
+  }
+  els.roomContent.innerHTML = `
+    ${scoreHtml}
+    ${wheelHtml}
+    <div class="bottom-panel"><div class="bottom-frame">${bottomHtml}</div></div>`;
+  const canvas = document.getElementById("wheel");
+  drawBracketWheelStatic(canvas, p1, p2, m.match_id);
+  const rr = document.getElementById("bracket-room-ready");
+  if(rr) rr.addEventListener("click",()=>{
+    wsSend({type: "bracket_room_ready", match_id: m.match_id});
+    rr.disabled = true; rr.textContent = "✅ ОТПРАВЛЕНО"; rr.classList.add("pressed");
+  });
+}
+
+function drawBracketRoomRoundResult(m){
+  const winName = m.last_spin && m.last_spin.winner_user_id === (m.p1 && m.p1.user_id)
+    ? (m.p1 && m.p1.name) : (m.p2 && m.p2.name);
+  const p1w = m.p1_wins||0, p2w = m.p2_wins||0;
+  const target = m.series_target || 3;
+  const roundsLeft = `До победы: ${Math.max(0, target - Math.max(p1w, p2w))}`;
+  els.roomContent.innerHTML = `
+    ${renderScorePanel(m)}
+    <div class="bottom-panel"><div class="bottom-frame">
+      <div class="bottom-title">Раунд завершён</div>
+      <div style="text-align:center;padding:6px 0;">
+        <div style="font-size:44px;filter:drop-shadow(0 0 12px rgba(255,180,60,.5));">🎯</div>
+        <div style="color:#fff;font-size:15px;font-weight:900;margin-top:6px;">Раунд выиграл: <b style="color:#ffcc00;">${escapeHtml(winName||"—")}</b></div>
+        <div style="color:#e5e5e5;font-size:14px;margin-top:6px;">Счёт: <b style="color:#ffcc00;">${p1w}:${p2w}</b></div>
+        <div style="color:#9a9a9a;font-size:12px;margin-top:4px;">${roundsLeft}</div>
+        <div style="color:#ffcc00;font-size:12px;margin-top:10px;font-weight:900;">Следующий спин через <span id="br-next-cd">3</span>…</div>
+      </div>
+    </div></div>`;
+  let sec = 3;
+  const tick = setInterval(()=>{
+    sec--;
+    const el = document.getElementById("br-next-cd");
+    if(el) el.textContent = Math.max(0, sec);
+    if(sec <= 0) clearInterval(tick);
+  }, 1000);
+}
+
+function drawBracketRoomFinalResult(m){
+  const winName = m.winner ? m.winner.name : "—";
+  const iWon = m.winner && m.winner.user_id === MY_ID;
+  const iLost = m.loser && m.loser.user_id === MY_ID;
+  const p1w = m.p1_wins||0, p2w = m.p2_wins||0;
+  let icon = "🏆", title = "";
+  if(iWon) title = "Вы прошли дальше!";
+  else if(iLost) title = "Вы выбыли из турнира";
+  else title = `Победитель: ${escapeHtml(winName)}`;
+  els.roomContent.innerHTML = `
+    ${renderScorePanel(m)}
+    <div class="bottom-panel"><div class="bottom-frame">
+      <div class="bottom-title">Серия завершена</div>
+      <div style="text-align:center;padding:6px 0;">
+        <div style="font-size:44px;">${icon}</div>
+        <div style="color:#fff;font-size:15px;font-weight:900;margin-top:6px;">${title}</div>
+        <div style="color:#e5e5e5;font-size:14px;margin-top:6px;">Финальный счёт: <b style="color:#ffcc00;">${p1w}:${p2w}</b></div>
+        <div style="color:#ffcc00;font-size:12px;margin-top:10px;font-weight:900;">Возврат к сетке через <span id="br-exit-cd">7</span>…</div>
+      </div>
+    </div></div>`;
+  let sec = 7;
+  const tick = setInterval(()=>{
+    sec--;
+    const el = document.getElementById("br-exit-cd");
+    if(el) el.textContent = Math.max(0, sec);
+    if(sec <= 0) clearInterval(tick);
+  }, 1000);
+}
+
+/* ============ WHEEL КЭШ ============ */
+function _buildWheelHalo(size){
+  const cv = document.createElement("canvas"); cv.width = size; cv.height = size;
+  const ctx = cv.getContext("2d");
+  const cx = size/2, cy = size/2, r = size/2 - 30;
+  const grad = ctx.createRadialGradient(cx,cy,r*0.55,cx,cy,r+30);
+  grad.addColorStop(0,"rgba(220,20,60,0)");
+  grad.addColorStop(0.65,"rgba(255,140,0,0.22)");
+  grad.addColorStop(1,"rgba(255,180,60,0)");
+  ctx.fillStyle = grad; ctx.beginPath(); ctx.arc(cx,cy,r+30,0,Math.PI*2); ctx.fill();
+  return cv;
+}
+function _buildWheelSectors(players, size){
+  const cv = document.createElement("canvas"); cv.width = size; cv.height = size;
+  const ctx = cv.getContext("2d");
+  const cx = size/2, cy = size/2, r = size/2 - 30;
+  const n = Math.max(players.length, 1);
+  const palette = [
+    {fill:["#ffb04d","#cc6600"]},{fill:["#e6192b","#7a0008"]},
+    {fill:["#ffcc00","#a06a00"]},{fill:["#ff6b00","#8b3000"]},
+    {fill:["#c41030","#5a0010"]},
+  ];
+  for(let i = 0; i < n; i++){
+    const a0 = (i/n)*Math.PI*2 - Math.PI/2;
+    const a1 = ((i+1)/n)*Math.PI*2 - Math.PI/2;
+    const col = palette[i % palette.length];
+    const grad = ctx.createRadialGradient(cx, cy, r*0.15, cx, cy, r);
+    grad.addColorStop(0, col.fill[0]); grad.addColorStop(1, col.fill[1]);
+    ctx.beginPath(); ctx.moveTo(cx,cy); ctx.arc(cx,cy,r,a0,a1); ctx.closePath();
+    ctx.fillStyle = grad; ctx.fill();
+    ctx.strokeStyle = "rgba(0,0,0,.4)"; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.moveTo(cx,cy); ctx.lineTo(cx + r*Math.cos(a0), cy + r*Math.sin(a0)); ctx.stroke();
+    const mid = (a0+a1)/2;
+    ctx.save(); ctx.translate(cx,cy); ctx.rotate(mid);
+    ctx.textAlign = "right"; ctx.textBaseline = "middle";
+    ctx.shadowColor = "rgba(0,0,0,.9)"; ctx.shadowBlur = 8; ctx.shadowOffsetX = 2; ctx.shadowOffsetY = 2;
+    ctx.fillStyle = "#ffffff"; ctx.font = "900 22px 'Segoe UI',sans-serif";
+    const label = players[i] ? players[i].name : "";
+    const txt = label.length > 18 ? label.slice(0,18)+"…" : label;
+    ctx.fillText(txt, r - 18, 0); ctx.restore();
+    ctx.save(); ctx.translate(cx,cy); ctx.rotate(mid);
+    const dotX = r - 22 - ctx.measureText(txt).width - 8;
+    ctx.beginPath(); ctx.arc(dotX, 0, 5, 0, Math.PI*2);
+    ctx.fillStyle = "#4ade80"; ctx.shadowColor = "#22c55e"; ctx.shadowBlur = 8; ctx.fill();
+    ctx.restore();
+  }
+  const innerR = r - 4;
+  ctx.save(); ctx.beginPath(); ctx.arc(cx,cy,innerR,0,Math.PI*2);
+  const ringGrad = ctx.createLinearGradient(0,0,size,size);
+  ringGrad.addColorStop(0,"#ffcc00"); ringGrad.addColorStop(0.5,"#d4a017"); ringGrad.addColorStop(1,"#ffcc00");
+  ctx.strokeStyle = ringGrad; ctx.lineWidth = 4; ctx.shadowColor = "#ffb040"; ctx.shadowBlur = 18; ctx.stroke(); ctx.restore();
+  return cv;
+}
+function _buildWheelOuterRing(size){
+  const cv = document.createElement("canvas"); cv.width = size; cv.height = size;
+  const ctx = cv.getContext("2d");
+  const cx = size/2, cy = size/2, r = size/2 - 20;
+  ctx.save();
+  const outerGrad = ctx.createLinearGradient(0,0,size,size);
+  outerGrad.addColorStop(0,"#ffe680"); outerGrad.addColorStop(0.3,"#c89020");
+  outerGrad.addColorStop(0.5,"#ffcc00"); outerGrad.addColorStop(0.7,"#a07010");
+  outerGrad.addColorStop(1,"#ffcc00");
+  ctx.beginPath(); ctx.arc(cx,cy,r-4,0,Math.PI*2);
+  ctx.strokeStyle = outerGrad; ctx.lineWidth = 12;
+  ctx.shadowColor = "rgba(255,180,60,.8)"; ctx.shadowBlur = 30; ctx.stroke();
+  ctx.restore();
+  ctx.save();
+  ctx.beginPath(); ctx.arc(cx,cy,r-11,0,Math.PI*2);
+  ctx.strokeStyle = "rgba(20,15,5,.9)"; ctx.lineWidth = 2; ctx.stroke();
+  ctx.restore();
+  for(let i = 0; i < 24; i++){
+    const a = (i/24)*Math.PI*2;
+    const x = cx + (r-4) * Math.cos(a);
+    const y = cy + (r-4) * Math.sin(a);
+    ctx.beginPath(); ctx.arc(x,y,2,0,Math.PI*2);
+    ctx.fillStyle = "rgba(60,40,10,.8)"; ctx.fill();
+  }
+  return cv;
+}
+function _buildWheelHub(size){
+  const cv = document.createElement("canvas"); cv.width = size; cv.height = size;
+  const ctx = cv.getContext("2d");
+  const cx = size/2, cy = size/2;
+  const hubR = 62;
+  ctx.save();
+  const glowGrad = ctx.createRadialGradient(cx,cy,hubR*0.6,cx,cy,hubR+20);
+  glowGrad.addColorStop(0,"rgba(255,180,60,.6)"); glowGrad.addColorStop(1,"rgba(255,140,0,0)");
+  ctx.beginPath(); ctx.arc(cx,cy,hubR+20,0,Math.PI*2);
+  ctx.fillStyle = glowGrad; ctx.fill();
+  ctx.restore();
+  ctx.save();
+  ctx.beginPath(); ctx.arc(cx,cy,hubR,0,Math.PI*2);
+  const ringGrad = ctx.createRadialGradient(cx,cy,hubR*0.7,cx,cy,hubR);
+  ringGrad.addColorStop(0,"#ffe680"); ringGrad.addColorStop(0.5,"#d4a017"); ringGrad.addColorStop(1,"#8b6508");
+  ctx.fillStyle = ringGrad; ctx.fill();
+  ctx.restore();
+  ctx.save();
+  ctx.beginPath(); ctx.arc(cx,cy,hubR-6,0,Math.PI*2);
+  const hubGrad = ctx.createRadialGradient(cx,cy,hubR*0.1,cx,cy,hubR-6);
+  hubGrad.addColorStop(0,"#2a1f10"); hubGrad.addColorStop(1,"#0a0a0a");
+  ctx.fillStyle = hubGrad; ctx.shadowColor = "rgba(255,180,60,.6)"; ctx.shadowBlur = 20; ctx.fill();
+  ctx.restore();
+  ctx.save(); ctx.textAlign = "center"; ctx.textBaseline = "middle";
+  ctx.font = "44px sans-serif"; ctx.shadowColor = "#ffcc00"; ctx.shadowBlur = 18;
+  ctx.fillText("🎡", cx, cy); ctx.restore();
+  return cv;
+}
+function _getWheelCache(players, key, size){
+  if(WCACHE.key === key && WCACHE.size === size && WCACHE.sectors && WCACHE.halo && WCACHE.outer && WCACHE.hub) return WCACHE;
+  WCACHE = {
+    key, size,
+    halo:_buildWheelHalo(size),
+    sectors:_buildWheelSectors(players,size),
+    outer:_buildWheelOuterRing(size),
+    hub:_buildWheelHub(size)
+  };
+  return WCACHE;
+}
+function _drawBracketWheelFrame(canvas, players, match_id){
+  if(!canvas) return;
+  const ctx = canvas.getContext("2d");
+  ctx.imageSmoothingEnabled = false;
+  const W = canvas.width, H = canvas.height, cx = W/2, cy = H/2;
+  const key = match_id + "|" + players.map(p => (p && p.user_id) || "_").join(",");
+  const cache = _getWheelCache(players, key, W);
+  ctx.clearRect(0,0,W,H);
+  ctx.drawImage(cache.halo, 0, 0);
+  ctx.save(); ctx.translate(cx,cy); ctx.rotate(WHEEL_ANGLE);
+  ctx.drawImage(cache.sectors, -W/2, -H/2);
+  ctx.restore();
+  ctx.drawImage(cache.outer, 0, 0);
+  ctx.drawImage(cache.hub, 0, 0);
+}
+function drawBracketWheelStatic(canvas, p1, p2, match_id){if(!canvas) return; _drawBracketWheelFrame(canvas, [p1,p2].filter(Boolean), match_id || "static");}
+function animateBracketSpin(s, m, onDone){
+  const mid = m.match_id;
+  const canvas = document.getElementById("wheel");
+  if(!canvas){ if(onDone) setTimeout(onDone, 50); return; }
+  cancelBracketAnim(mid);
+  const players = [m.p1, m.p2].filter(Boolean);
+  const n = players.length;
+  const winnerIdx = m.last_spin.winner_index;
+  const offsetRatio = m.last_spin.final_offset_ratio || 0;
+  const duration = m.last_spin.duration || 20000;
+  const serverStart = m.last_spin.started_at || nowServer();
+  const turns = pickSpinTurns();
+  const span = Math.PI*2/n, center = -(winnerIdx+0.5)*span;
+  const turnsRad = turns * Math.PI * 2;
+  const target = center + offsetRatio*span + turnsRad;
+  const startAngle = target - turnsRad;
+  const el = nowServer() - serverStart;
+  const initialK = Math.min(1, Math.max(0, el/duration));
+  WHEEL_ANGLE = startAngle + (target - startAngle)*SPIN_EASING(initialK);
+  _drawBracketWheelFrame(canvas, players, mid);
+  if(initialK >= 1){
+    WHEEL_ANGLE = target;
+    _drawBracketWheelFrame(canvas, players, mid);
+    if(onDone) onDone();
+    return;
+  }
+  function frame(){
+    if(BRACKET_ACTIVE_MATCH_ID !== mid){ BRACKET_MATCH_VIEW_ANIM[mid] = null; return; }
+    const elapsed = nowServer() - serverStart;
+    const k = Math.min(1, Math.max(0, elapsed/duration));
+    WHEEL_ANGLE = startAngle + (target - startAngle)*SPIN_EASING(k);
+    _drawBracketWheelFrame(canvas, players, mid);
+    if(k < 1){ BRACKET_MATCH_VIEW_ANIM[mid] = requestAnimationFrame(frame); }
+    else {
+      WHEEL_ANGLE = target;
+      _drawBracketWheelFrame(canvas, players, mid);
+      BRACKET_MATCH_VIEW_ANIM[mid] = null;
+      if(onDone) onDone();
+    }
+  }
+  BRACKET_MATCH_VIEW_ANIM[mid] = requestAnimationFrame(frame);
+}
+
+/* ================== КОЛЕСО 1×1 ================== */
+function renderWheel1v1(s){
+  LAST_STATE = s;
+  els.roomExitBtn.classList.add("hidden");
+  if(s.waiting){
+    els.rmCounter.textContent = `Ожидание…`;
+    els.roomContent.innerHTML = `<div class="waiting-box"><div class="waiting-ico">⚔️</div><div class="waiting-txt">Ожидание принятия…</div></div>`;
+    return;
+  }
+  if(W1V1_VIEW_STATE === "spinning") return;
+  if(W1V1_VIEW_STATE === "showing_result" || W1V1_VIEW_STATE === "final_result") return;
+  const players = s.players || [];
+  const lastShown = W1V1_LAST_SHOWN || 0;
+  const hasNewSpin = s.last_spin && s.spin_count > lastShown;
+  if(hasNewSpin){
+    W1V1_LAST_SHOWN = s.spin_count;
+    W1V1_VIEW_STATE = "spinning";
+    startWheel1v1Animation(s, ()=>{
+      setTimeout(()=>{
+        if(W1V1_VIEW_STATE !== "spinning") return;
+        const st = LAST_STATE;
+        if(!st) return;
+        if(st.finished){
+          W1V1_VIEW_STATE = "final_result";
+          drawWheel1v1FinalResult(st);
+          if(W1V1_TIMER) clearTimeout(W1V1_TIMER);
+          W1V1_TIMER = setTimeout(()=>{
+            W1V1_VIEW_STATE = "idle";
+            if(W1V1_TIMER){clearTimeout(W1V1_TIMER);W1V1_TIMER=null;}
+            exitRoom();
+          }, 8000);
+        } else {
+          W1V1_VIEW_STATE = "showing_result";
+          drawWheel1v1RoundResult(st);
+          if(W1V1_TIMER) clearTimeout(W1V1_TIMER);
+          W1V1_TIMER = setTimeout(()=>{
+            W1V1_VIEW_STATE = "idle";
+            if(W1V1_TIMER){clearTimeout(W1V1_TIMER);W1V1_TIMER=null;}
+            if(LAST_STATE) renderWheel1v1(LAST_STATE);
+          }, 3500);
+        }
+      }, 1000);
+    });
+    return;
+  }
+  if(s.finished){
+    W1V1_VIEW_STATE = "final_result";
+    drawWheel1v1FinalResult(s);
+    return;
+  }
+  drawWheel1v1UI(s);
+}
+
+function _w1v1ScoreHtml(s){
+  const players = s.players || [];
+  const p1 = players[0] || {user_id:null,name:"—"};
+  const p2 = players[1] || {user_id:null,name:"—"};
+  const p1w = s.p1_wins || 0, p2w = s.p2_wins || 0;
+  const target = s.series_target || 1;
+  const readyIds = new Set(s.ready || []);
+  const p1Ready = readyIds.has(p1.user_id);
+  const p2Ready = readyIds.has(p2.user_id);
+  const iAmP1 = p1.user_id === MY_ID;
+  const iAmP2 = p2.user_id === MY_ID;
+  return `
+    <div class="score-panel"><div class="score-frame">
+      <div class="score-player">
+        <div class="ava">${iAmP1 ? '🙋' : '👤'}</div>
+        <div class="nm">${escapeHtml(p1.name)}</div>
+        <div class="score-num">${p1w}</div>
+        <div class="tag ${p1Ready ? 'ready' : 'notready'}">${p1Ready ? '✓ готов' : 'не готов'}</div>
+      </div>
+      <div class="score-vs">
+        <div class="vs-label">VS</div>
+        <div class="target">до ${target} побед</div>
+      </div>
+      <div class="score-player">
+        <div class="ava">${iAmP2 ? '🙋' : '👤'}</div>
+        <div class="nm">${escapeHtml(p2.name)}</div>
+        <div class="score-num">${p2w}</div>
+        <div class="tag ${p2Ready ? 'ready' : 'notready'}">${p2Ready ? '✓ готов' : 'не готов'}</div>
+      </div>
+    </div></div>`;
+}
+
+function drawWheel1v1UI(s){
+  const players = s.players || [];
+  const readyIds = new Set(s.ready || []);
+  const iAmReady = MY_ID !== null && readyIds.has(MY_ID);
+  const iAmPlayer = players.some(p => p.user_id === MY_ID);
+  const target = s.series_target || 1;
+  els.rmCounter.textContent = `Колесо 1×1 · до ${target}`;
+  const scoreHtml = _w1v1ScoreHtml(s);
+  const wheelCaption = `<div class="wheel-caption"><span class="ic">🎡</span><span>2 на колесе</span></div>`;
+  const wheelHtml = `
+    <div class="wheel-arena">${wheelCaption}
+      <div class="wheel-frame"><div class="wheel-frame-inner">
+        <div class="pointer"></div>
+        <canvas id="wheel" width="640" height="640"></canvas>
+      </div></div>
+    </div>`;
+  let bottomHtml = "";
+  if(iAmPlayer && !s.finished){
+    bottomHtml += `<div class="bottom-title">Управление колесом</div>`;
+    if(iAmReady){
+      bottomHtml += `<div class="ready-btn"><button class="pressed" disabled>✅ ВЫ ГОТОВЫ</button></div>`;
+      bottomHtml += `<div class="bottom-info muted">Ждём серию…</div>`;
+    } else {
+      bottomHtml += `<div class="ready-btn"><button id="ready-btn">🤝 ГОТОВ</button></div>`;
+      bottomHtml += `<div class="bottom-info muted">Оба должны нажать «Готов»</div>`;
+    }
+  } else if(!iAmPlayer){
+    bottomHtml += `<div class="bottom-title">Наблюдение</div>`;
+    bottomHtml += `<div class="bottom-info">👁 Вы наблюдаете</div>`;
+  }
+  let participantsHtml = `<div class="participants"><div class="participants-frame"><h3>👥 Участники (${players.length})</h3><div class="p-list">`;
+  players.forEach(p=>{
+    const r = readyIds.has(p.user_id);
+    participantsHtml += `<div class="p-row ${r?'':'elim'}" style="${r?'':'opacity:1;text-decoration:none;'}">
+      <span><span class="dot"></span>${escapeHtml(p.name)}</span>
+      <span>${r ? 'готов' : 'в игре'}</span>
+    </div>`;
+  });
+  participantsHtml += `</div></div></div>`;
+  els.roomContent.innerHTML = `${scoreHtml}${wheelHtml}<div class="bottom-panel"><div class="bottom-frame">${bottomHtml}</div></div>${participantsHtml}`;
+  const canvas = document.getElementById("wheel");
+  _drawBracketWheelFrame(canvas, players, "1v1_" + (s.tid || ""));
+  const readyBtn = document.getElementById("ready-btn");
+  if(readyBtn) readyBtn.addEventListener("click",()=>{
+    if(MY_READY) return;
+    MY_READY = true;
+    wsSend({type: "ready"});
+    readyBtn.disabled = true;
+    readyBtn.textContent = "✅ ОТПРАВЛЕНО";
+    readyBtn.classList.add("pressed");
+  });
+}
+
+function drawWheel1v1RoundResult(s){
+  const winName = s.last_spin && s.last_spin.winner_name ? s.last_spin.winner_name : "—";
+  const p1w = s.p1_wins || 0, p2w = s.p2_wins || 0;
+  const target = s.series_target || 1;
+  const roundsLeft = `До победы: ${Math.max(0, target - Math.max(p1w, p2w))}`;
+  els.roomContent.innerHTML = `
+    ${_w1v1ScoreHtml(s)}
+    <div class="bottom-panel"><div class="bottom-frame">
+      <div class="bottom-title">Раунд завершён</div>
+      <div style="text-align:center;padding:6px 0;">
+        <div style="font-size:44px;">🎯</div>
+        <div style="color:#fff;font-size:15px;font-weight:900;margin-top:6px;">Раунд выиграл: <b style="color:#ffcc00;">${escapeHtml(winName)}</b></div>
+        <div style="color:#e5e5e5;font-size:14px;margin-top:6px;">Счёт: <b style="color:#ffcc00;">${p1w}:${p2w}</b></div>
+        <div style="color:#9a9a9a;font-size:12px;margin-top:4px;">${roundsLeft}</div>
+        <div style="color:#ffcc00;font-size:12px;margin-top:10px;font-weight:900;">Следующий спин…</div>
+      </div>
+    </div></div>`;
+}
+
+function drawWheel1v1FinalResult(s){
+  const winner = s.winner;
+  const iWon = winner && winner.user_id === MY_ID;
+  const p1w = s.p1_wins || 0, p2w = s.p2_wins || 0;
+  let icon = "🏆", title = "";
+  if(iWon) title = "ВЫ ПОБЕДИЛИ!";
+  else title = `Победитель: ${escapeHtml(winner?.name || "—")}`;
+  els.roomContent.innerHTML = `
+    ${_w1v1ScoreHtml(s)}
+    <div class="bottom-panel"><div class="bottom-frame">
+      <div class="bottom-title">Серия завершена</div>
+      <div style="text-align:center;padding:6px 0;">
+        <div style="font-size:48px;">${icon}</div>
+        <div style="color:#fff;font-size:16px;font-weight:900;margin-top:8px;">${title}</div>
+        <div style="color:#e5e5e5;font-size:14px;margin-top:6px;">Финальный счёт: <b style="color:#ffcc00;">${p1w}:${p2w}</b></div>
+        <div style="color:#ffcc00;font-size:12px;margin-top:10px;font-weight:900;">Возврат в меню через <span id="w1v1-exit-cd">8</span>…</div>
+      </div>
+    </div></div>`;
+  if(iWon) fireConfetti();
+  let sec = 8;
+  const tick = setInterval(()=>{
+    sec--;
+    const el = document.getElementById("w1v1-exit-cd");
+    if(el) el.textContent = Math.max(0, sec);
+    if(sec <= 0) clearInterval(tick);
+  }, 1000);
+}
+
+function startWheel1v1Animation(s, onDone){
+  WHEEL_LOCK = true;
+  const players = s.players || [];
+  els.roomContent.innerHTML = `
+    ${_w1v1ScoreHtml(s)}
+    <div class="wheel-arena"><div class="wheel-frame"><div class="wheel-frame-inner">
+      <div class="pointer"></div>
+      <canvas id="wheel" width="640" height="640"></canvas>
+    </div></div></div>`;
+  const canvas = document.getElementById("wheel");
+  if(!canvas){WHEEL_LOCK = false; onDone && onDone(); return;}
+  if(W1V1_ANIM){try{cancelAnimationFrame(W1V1_ANIM);}catch(e){} W1V1_ANIM = null;}
+  const n = players.length;
+  const winnerIdx = s.last_spin.winner_index;
+  const offsetRatio = s.last_spin.final_offset_ratio || 0;
+  const duration = s.last_spin.duration || 8000;
+  const serverStart = s.last_spin.started_at || nowServer();
+  const turns = pickSpinTurns();
+  const span = Math.PI*2/n, center = -(winnerIdx+0.5)*span;
+  const turnsRad = turns * Math.PI * 2;
+  const target = center + offsetRatio*span + turnsRad;
+  const startAngle = target - turnsRad;
+  const matchKey = "1v1spin_" + (s.tid||"");
+  function setPhase(){
+    const el = nowServer() - serverStart;
+    const k = Math.min(1, Math.max(0, el/duration));
+    WHEEL_ANGLE = startAngle + (target - startAngle) * SPIN_EASING(k);
+    return k;
+  }
+  setPhase(); _drawBracketWheelFrame(canvas, players, matchKey);
+  function frame(){
+    const k = setPhase();
+    _drawBracketWheelFrame(canvas, players, matchKey);
+    if(k < 1) W1V1_ANIM = requestAnimationFrame(frame);
+    else {
+      WHEEL_ANGLE = target;
+      _drawBracketWheelFrame(canvas, players, matchKey);
+      WHEEL_LOCK = false;
+      W1V1_ANIM = null;
+      if(PENDING_ENDED){const e = PENDING_ENDED; PENDING_ENDED = null; setTimeout(()=>_showEndedModal(e), 600);}
+      if(onDone) onDone();
+    }
+  }
+  W1V1_ANIM = requestAnimationFrame(frame);
+}
+
+/* ============================================================
+   POKER LOBBY RENDER
+   ============================================================ */
+function renderPokerLobby(s){
+  LAST_STATE = s;
+  PK_LAST_LOBBY = s;
+  PK_VIEW = "lobby";
+  PK_UNSEATED_DEADLINE_MS = s.unseated_deadline_ms || 0;
+  els.roomExitBtn.classList.add("hidden");
+  els.rmCounter.textContent = `Покер · лобби`;
+
+  // Инфо-блок
+  const info = `
+    <div class="pk-lobby-info">
+      <div class="pk-info-cell"><div class="lbl">Стек</div><div class="val">${s.starting_stack||1000}</div></div>
+      <div class="pk-info-cell"><div class="lbl">Блайнды</div><div class="val">${(s.sb||10)}/${(s.bb||20)}</div></div>
+      <div class="pk-info-cell"><div class="lbl">Ход</div><div class="val">${s.turn_time||20}с</div></div>
+      <div class="pk-info-cell"><div class="lbl">Мест</div><div class="val">${s.max_seats||7}</div></div>
+    </div>`;
+
+  // Баннер нерассаженного
+  let banner = "";
+  if(!s.is_seated && PK_UNSEATED_DEADLINE_MS && PK_UNSEATED_DEADLINE_MS*1000 > Date.now()){
+    const rem = Math.max(0, Math.ceil((PK_UNSEATED_DEADLINE_MS - Date.now()/1000)));
+    banner = `
+      <div class="pk-unseated-banner">
+        <span class="big">🪑 Выберите стол</span>
+        Если не сесть за стол в течение <span class="cd" id="pk-unseated-cd">${rem}</span> сек — вас исключат из турнира.
+      </div>`;
+  } else if(!s.is_seated){
+    banner = `
+      <div class="pk-unseated-banner">
+        <span class="big">🪑 Выберите стол</span>
+        Нажмите «Сесть» на любом свободном столе.
+      </div>`;
+  }
+
+  // Табы
+  const tabs = `
+    <div class="pk-lobby-tabs">
+      <div class="pk-lobby-tab ${PK_LOBBY_TAB==='tables'?'active':''}" data-pktab="tables">🃏 Столы</div>
+      <div class="pk-lobby-tab ${PK_LOBBY_TAB==='ranking'?'active':''}" data-pktab="ranking">🏆 Рейтинг</div>
+    </div>`;
+
+  let body = "";
+  if(PK_LOBBY_TAB === "tables"){
+    const tables = s.tables || [];
+    if(!tables.length){
+      body = `<div class="waiting-box" style="padding:40px 20px;"><div class="waiting-ico">🃏</div><div class="waiting-txt">Столы ещё не созданы</div><div style="color:var(--text-muted);font-size:12px;margin-top:4px;">Ожидайте запуска турнира.</div></div>`;
+    } else {
+      body = `<div style="display:flex;flex-direction:column;gap:10px;">`;
+      tables.forEach(t=>{
+        const freeSeats = t.free_seats !== undefined ? t.free_seats : Math.max(0, (s.max_seats||7) - (t.players_count||0));
+        const isFull = freeSeats <= 0;
+        const isMyTable = (s.my_table_id === t.table_id);
+        const canSit = !s.is_seated && !isFull;
+        const seatedCount = t.seated_count !== undefined ? t.seated_count : (t.players_count||0);
+        const freeLabel = `${seatedCount} / ${s.max_seats||7}`;
+
+        let statusCls = "waiting";
+        let statusTxt = "Ожидание";
+        if(t.merge_warning_until && t.merge_warning_until*1000 > Date.now()){
+          statusCls = "merge"; statusTxt = "⚠ Слияние";
+        } else if(t.started || (t.phase && t.phase !== "waiting")){
+          statusCls = "running"; statusTxt = `Идёт (#${t.hand_number||0})`;
+        } else if(isFull){
+          statusCls = "full"; statusTxt = "Полон";
+        }
+
+        let cls = "pk-table-card";
+        if(isMyTable) cls += " mine";
+        if(isFull && !isMyTable) cls += " full";
+
+        let btn;
+        if(isMyTable){
+          btn = `<button class="pkt-btn open" data-pk-open="${t.table_id}">🎮 Открыть стол</button>`;
+        } else if(s.is_seated){
+          btn = `<button class="pkt-btn full" disabled>Вы уже за столом #${s.my_table_id}</button>`;
+        } else if(isFull){
+          btn = `<button class="pkt-btn full" disabled>Стол полон</button>`;
+        } else {
+          btn = `<button class="pkt-btn" data-pk-sit="${t.table_id}">🪑 Сесть за стол</button>`;
+        }
+
+        const playersChips = (t.player_chips || []);
+        const chipsRow = playersChips.length
+          ? `<div class="pkt-players">${playersChips.slice(0,8).map(p => `<span class="pkt-chip">${escapeHtml(p.name||"")}: ${p.chips||0}</span>`).join("")}</div>`
+          : "";
+
+        body += `
+          <div class="${cls}">
+            <div class="pkt-hdr">
+              <div class="pkt-title">🃏 Стол #${t.table_id}</div>
+              <div class="pkt-status ${statusCls}">${statusTxt}</div>
+            </div>
+            <div class="pkt-meta">
+              <span>👥 Мест: <b>${freeLabel}</b></span>
+              <span>💰 Ср. стек: <b>${t.avg_stack || 0}</b></span>
+              <span>🏦 Банк: <b>${t.pot || 0}</b></span>
+            </div>
+            ${chipsRow}
+            ${btn}
+          </div>`;
+      });
+      body += `</div>`;
+    }
+  } else {
+    // ranking
+    const players = s.players || [];
+    if(!players.length){
+      body = `<div class="waiting-box" style="padding:40px 20px;"><div class="waiting-ico">📊</div><div class="waiting-txt">Рейтинг пуст</div></div>`;
+    } else {
+      body = `<div class="pk-ranking-list">`;
+      let place = 1;
+      players.forEach(p=>{
+        const isOut = p.finish_place !== null && p.finish_place !== undefined;
+        const isMe = p.user_id === MY_ID;
+        const cls = "pk-rank-row" + (isOut ? " out" : "") + (isMe ? " me" : "");
+        const placeShow = isOut ? ("#" + p.finish_place) : place;
+        const chipsShow = isOut ? "выбыл" : `💰 ${p.chips}`;
+        // статус посадки
+        let seatTag = "";
+        if(!isOut){
+          if(p.seated === false){
+            seatTag = `<span class="rk-unseated">не за столом</span>`;
+          } else if(p.table_id){
+            seatTag = `<span class="rk-place-seated">стол #${p.table_id}</span>`;
+          }
+        }
+        // кнопка исключить (для админов, не для себя)
+        let kickBtn = "";
+        if(IS_ADMIN && !isMe && !isOut){
+          kickBtn = `<button class="rk-kick" data-pk-kick="${p.user_id}" data-pk-kick-name="${escapeHtml(p.name||"")}">🚫 Искл.</button>`;
+        }
+        body += `
+          <div class="${cls}">
+            <div class="rk-place">${placeShow}</div>
+            <div class="rk-name">${escapeHtml(p.name)}${isMe ? ' <span style="color:#ffcc00;">(вы)</span>' : ''}</div>
+            ${seatTag}
+            <div class="rk-chips">${chipsShow}</div>
+            ${kickBtn}
+          </div>`;
+        if(!isOut) place++;
+      });
+      body += `</div>`;
+    }
+  }
+
+  els.roomContent.innerHTML = `<div class="pk-lobby">${info}${banner}${tabs}${body}</div>`;
+
+  // события
+  els.roomContent.querySelectorAll(".pk-lobby-tab").forEach(el=>{
+    el.addEventListener("click",()=>{
+      PK_LOBBY_TAB = el.dataset.pktab;
+      if(PK_LAST_LOBBY) renderPokerLobby(PK_LAST_LOBBY);
+    });
+  });
+  els.roomContent.querySelectorAll("[data-pk-sit]").forEach(el=>{
+    el.addEventListener("click",(e)=>{
+      e.stopPropagation();
+      const tid = parseInt(el.dataset.pkSit,10);
+      if(!tid) return;
+      wsSend({type:"poker_sit", table_id:tid});
+    });
+  });
+  els.roomContent.querySelectorAll("[data-pk-open]").forEach(el=>{
+    el.addEventListener("click",(e)=>{
+      e.stopPropagation();
+      const tid = parseInt(el.dataset.pkOpen,10);
+      if(!tid) return;
+      openPokerTable(tid);
+    });
+  });
+  els.roomContent.querySelectorAll("[data-pk-kick]").forEach(el=>{
+    el.addEventListener("click",(e)=>{
+      e.stopPropagation();
+      const uid = parseInt(el.dataset.pkKick,10);
+      const nm = el.dataset.pkKickName || "Игрок";
+      if(!uid) return;
+      showConfirm("🚫 Исключить игрока?", `Игрок <b style="color:#ffcc00;">${escapeHtml(nm)}</b> будет исключён из покер-турнира.`, ()=>{
+        wsSend({type:"admin_kick_player", user_id: uid});
+      });
+    });
+  });
+}
+
+function openPokerTable(tableId){
+  PK_VIEW = "table";
+  PK_TABLE_ID = tableId;
+  PK_MERGE_MODAL_SHOWN = false;
+  wsSend({type:"poker_enter_table", table_id: tableId});
+  els.roomExitBtn.classList.remove("hidden");
+  els.roomExitBtn.textContent = "⬅️ В лобби";
+  els.roomContent.innerHTML = `<div class="waiting-box"><div class="waiting-ico">🃏</div><div class="waiting-txt">Подключение к столу…</div></div>`;
+}
+
+/* ============================================================
+   POKER TABLE RENDER
+   ============================================================ */
+function pokerSeatPositions(total){
+  const positions = [];
+  const nOpp = Math.max(0, total - 1);
+  const cx = 50, cy = 50;
+  const rx = 42, ry = 40;
+  if(nOpp === 1){
+    positions.push([50, 14]);
+  } else if(nOpp > 1){
+    for(let i = 0; i < nOpp; i++){
+      const t = i / (nOpp - 1);
+      const angleDeg = 165 - t * 150;
+      const rad = angleDeg * Math.PI / 180;
+      const x = cx + rx * Math.cos(rad);
+      const y = cy - ry * Math.sin(rad);
+      positions.push([x, y]);
+    }
+  }
+  positions.push([50, 90]);
+  return positions;
+}
+
+function cardMiniHtml(card){
+  if(!card || card === "?" || card.length < 2){
+    return `<div class="mini">?</div>`;
+  }
+  const r = card[0] === "T" ? "10" : card[0];
+  const s = card.slice(1);
+  const red = (s === "♥" || s === "♦") ? " red" : "";
+  return `<div class="mini face${red}">${r}<span class="s">${s}</span></div>`;
+}
+function cardBigHtml(card){
+  if(!card || card === "?" || card.length < 2) return `<div class="card empty"></div>`;
+  const r = card[0] === "T" ? "10" : card[0];
+  const s = card.slice(1);
+  const red = (s === "♥" || s === "♦") ? " red" : "";
+  return `<div class="card${red}"><span class="r">${r}</span><span class="s">${s}</span></div>`;
+}
+
+function renderPokerState(s){
+  LAST_STATE = s;
+  if(PK_VIEW !== "table"){
+    PK_VIEW = "table";
+    PK_TABLE_ID = s.table_id;
+    els.roomExitBtn.classList.remove("hidden");
+    els.roomExitBtn.textContent = "⬅️ В лобби";
+  }
+  if(s.table_id) PK_TABLE_ID = s.table_id;
+
+  if(!s.players || !s.players.length){
+    els.roomContent.innerHTML = `<div class="waiting-box"><div class="waiting-ico">🃏</div><div class="waiting-txt">Ожидание игроков…</div></div>`;
+    return;
+  }
+
+  const players = s.players;
+  const meIdx = (s.me_idx !== undefined && s.me_idx >= 0) ? s.me_idx : 0;
+  const me = players[meIdx] || {};
+  const positions = pokerSeatPositions(players.length);
+  els.rmCounter.textContent = `Стол #${s.table_id||0} · Раздача #${s.hand_number||0} · Блайнды ${s.sb||10}/${s.bb||20}`;
+
+  let seatsHtml = "";
+  let order = [];
+  for(let i = 0; i < players.length; i++){
+    if(i === meIdx) continue;
+    order.push(i);
+  }
+  order.push(meIdx);
+  order.forEach((idx, posIdx)=>{
+    const p = players[idx];
+    const pos = positions[posIdx] || [50,50];
+    const isTurn = (idx === s.turn_idx);
+    const isDealer = !!p.is_dealer;
+    const folded = !!p.folded;
+    const sitOut = !!p.sit_out;
+    const isOut = (p.finish_place !== null && p.finish_place !== undefined);
+    const lastAction = p.last_action || "";
+    const lastActionCls = lastAction.toLowerCase().split(/\s+/)[0];
+    const cardsHtml = (p.cards || []).map(c => cardMiniHtml(c)).join("");
+    let cls = "poker-seat";
+    if(isTurn) cls += " turn";
+    if(isDealer) cls += " dealer";
+    if(folded) cls += " folded";
+    if(sitOut) cls += " sitout";
+    if(isOut) cls += " out";
+    seatsHtml += `
+      <div class="${cls}" data-idx="${idx}" style="left:${pos[0]}%;top:${pos[1]}%;">
+        <div class="poker-avatar-wrap">
+          <svg class="poker-timer-svg" viewBox="0 0 100 100">
+            <circle class="poker-timer-bg" cx="50" cy="50" r="45"/>
+            <circle class="poker-timer-ring" cx="50" cy="50" r="45"
+                    stroke-dasharray="283" stroke-dashoffset="283"/>
+          </svg>
+          <div class="poker-avatar">${idx === meIdx ? '🙋' : '👤'}</div>
+        </div>
+        <div class="pname">${escapeHtml(p.name)}${idx === meIdx ? ' (вы)' : ''}</div>
+        <div class="pchips">💰 ${p.chips}</div>
+        ${!isOut && cardsHtml ? `<div class="pcards">${cardsHtml}</div>` : ""}
+        ${lastAction ? `<div class="last-action ${lastActionCls}">${escapeHtml(lastAction)}</div>` : ""}
+        ${p.bet > 0 ? `<div class="bet-chip">${p.bet}</div>` : ""}
+        ${isOut ? `<div class="pfinish">#${p.finish_place}</div>` : ""}
+      </div>`;
+  });
+
+  const community = s.community || [];
+  let commHtml = "";
+  for(let i = 0; i < 5; i++){
+    commHtml += community[i] ? cardBigHtml(community[i]) : `<div class="card empty"></div>`;
+  }
+
+  const sidePotsHtml = (s.side_pots && s.side_pots.length)
+    ? `<div class="poker-sidepots">${s.side_pots.map((sp, i) => `<span class="sp">Side ${i+1}: ${sp.amount}</span>`).join("")}</div>`
+    : "";
+
+  const phaseNames = {preflop:"Префлоп", flop:"Флоп", turn:"Тёрн", river:"Ривер", showdown:"Вскрытие", waiting:"Ожидание"};
+  const phaseLabel = phaseNames[s.phase] || s.phase || "";
+
+  let mergeBanner = "";
+  if(s.merge_warning_until && s.merge_warning_until*1000 > Date.now()){
+    const rem = Math.max(0, Math.ceil((s.merge_warning_until*1000 - Date.now())/1000));
+    mergeBanner = `
+      <div class="pk-merge-banner" id="pk-merge-banner">
+        <span class="big">⚠️ Столы объединяются</span>
+        Слияние со столом #${s.merge_with_table_id || '—'} через <span class="cd">${rem}</span> сек
+      </div>`;
+  }
+
+  const feltHtml = `
+    <div class="poker-table-wrap">
+      <div class="poker-felt">
+        ${seatsHtml}
+        <div class="poker-center">
+          <div class="poker-pot">💰 Банк: ${s.pot||0}</div>
+          ${sidePotsHtml}
+          <div class="poker-community">${commHtml}</div>
+          <div class="poker-phase">${phaseLabel}</div>
+        </div>
+      </div>
+    </div>`;
+
+  const myCardsHtml = (me.cards || []).map(c => {
+    if(!c || c === "?" || c.length < 2) return `<div class="card" style="background:#222;color:#666;">?</div>`;
+    const r = c[0] === "T" ? "10" : c[0];
+    const suit = c.slice(1);
+    const red = (suit === "♥" || suit === "♦") ? " red" : "";
+    return `<div class="card${red}"><span class="r">${r}</span><span class="s">${suit}</span></div>`;
+  }).join("");
+  const myHandName = s.my_hand_name ? `🃏 ${s.my_hand_name}` : "";
+  const myZoneHtml = `
+    <div class="poker-myzone">
+      <div class="my-cards">${myCardsHtml || '<div class="hand-name muted" style="padding:16px;">Ждём раздачи…</div>'}</div>
+      ${myHandName ? `<div class="hand-name">${escapeHtml(myHandName)}</div>` : ""}
+    </div>`;
+
+  const isMyTurn = s.turn_idx === meIdx && !me.folded && !me.all_in && !me.sit_out && !me.finish_place;
+  const canCheck = s.can_check;
+  const canCall = s.can_call;
+  const canBet = s.can_bet;
+  const canRaise = s.can_raise;
+  const toCall = s.me_to_call || 0;
+  const myMaxBet = s.my_max_bet || 0;
+  const myMinBet = s.my_min_bet || 0;
+
+  PK_MIN = myMinBet;
+  PK_MAX = myMaxBet;
+  if(PK_CUR_BET < PK_MIN) PK_CUR_BET = PK_MIN;
+  if(PK_CUR_BET > PK_MAX) PK_CUR_BET = PK_MAX;
+
+  let controlsHtml = "";
+  if(isMyTurn){
+    const mainAction2Label = canCheck ? "CHECK" : `CALL ${toCall}`;
+    const mainAction3Label = canBet ? `BET ${PK_CUR_BET}` : (canRaise ? `RAISE ${PK_CUR_BET}` : "BET");
+    controlsHtml = `
+      <div class="poker-controls"><div class="frame">
+        <div class="bet-slider-row">
+          <button class="stepbtn" id="bet-minus" ${PK_CUR_BET <= PK_MIN ? "disabled" : ""}>−</button>
+          <div class="slider-wrap">
+            <input type="range" id="bet-slider" min="${PK_MIN}" max="${PK_MAX}" value="${PK_CUR_BET}" step="${Math.max(1, Math.floor((s.bb||20)/2))}"/>
+            <div class="bet-val" id="bet-val">${PK_CUR_BET}</div>
+          </div>
+          <button class="stepbtn" id="bet-plus" ${PK_CUR_BET >= PK_MAX ? "disabled" : ""}>+</button>
+        </div>
+        <div class="quick-bets">
+          <button data-quick="min">MIN</button>
+          <button data-quick="half">½ POT</button>
+          <button data-quick="pot">POT</button>
+          <button data-quick="allin">ALL-IN</button>
+        </div>
+        <div class="main-actions">
+          <button class="act-fold" data-act="fold">FOLD</button>
+          <button class="${canCheck ? 'act-check' : 'act-call'}" data-act="${canCheck ? 'check' : 'call'}">${mainAction2Label}</button>
+          <button class="${canBet ? 'act-bet' : 'act-raise'}" data-act="${canBet ? 'bet' : 'raise'}" ${(!canBet && !canRaise) ? "disabled" : ""}>${mainAction3Label}</button>
+        </div>
+        <div class="poker-utility">
+          <button id="pk-sitout" class="${me.sit_out ? 'active' : ''}">${me.sit_out ? "↩️ I'm back" : "💤 Sit out"}</button>
+          <button class="warn" id="pk-rebuy">💰 Rebuy</button>
+          <button class="danger" id="pk-leave">🚪 Leave</button>
+        </div>
+      </div></div>`;
+  } else {
+    const preCF = (s.pre_actions && s.pre_actions.check_fold) || false;
+    const preCA = (s.pre_actions && s.pre_actions.call_any) || false;
+    PK_PRE.check_fold = preCF;
+    PK_PRE.call_any = preCA;
+    const activePlayer = (s.turn_idx >= 0 && players[s.turn_idx]) ? players[s.turn_idx] : null;
+    const waitingLabel = activePlayer
+      ? `Ход: <span class="who">${escapeHtml(activePlayer.name)}</span>`
+      : (s.phase === "showdown" ? "Вскрытие…" : "Ожидание…");
+    const canPreAct = !me.folded && !me.sit_out && !me.finish_place && s.phase !== "showdown" && !s.finished;
+    controlsHtml = `
+      <div class="poker-controls"><div class="frame">
+        ${canPreAct ? `
+          <div class="pre-actions">
+            <div class="pre-row ${preCF ? 'on' : ''}" data-pre="check_fold">
+              <div class="cb">✓</div>
+              <div>Check / Fold <span style="color:#9a9a9a;font-size:10px;margin-left:4px;">(чек, если бесплатно — иначе фолд)</span></div>
+            </div>
+            <div class="pre-row ${preCA ? 'on' : ''}" data-pre="call_any">
+              <div class="cb">✓</div>
+              <div>Call Any <span style="color:#9a9a9a;font-size:10px;margin-left:4px;">(колл текущей ставки)</span></div>
+            </div>
+          </div>` : ""}
+        <div class="waiting-actions">${waitingLabel}</div>
+        <div class="poker-utility">
+          <button id="pk-sitout" class="${me.sit_out ? 'active' : ''}">${me.sit_out ? "↩️ I'm back" : "💤 Sit out"}</button>
+          <button class="warn" id="pk-rebuy">💰 Rebuy</button>
+          <button class="danger" id="pk-leave">🚪 Leave</button>
+        </div>
+      </div></div>`;
+  }
+
+  els.roomContent.innerHTML = mergeBanner + feltHtml + myZoneHtml + controlsHtml;
+
+  const sl = document.getElementById("bet-slider");
+  if(sl){
+    sl.addEventListener("input", ()=>{ PK_CUR_BET = parseInt(sl.value, 10) || 0; pkUpdateBetUI(); });
+  }
+  const bm = document.getElementById("bet-minus");
+  if(bm) bm.addEventListener("click", ()=>{ PK_CUR_BET = Math.max(PK_MIN, PK_CUR_BET - (s.bb||20)); pkUpdateBetUI(); });
+  const bp = document.getElementById("bet-plus");
+  if(bp) bp.addEventListener("click", ()=>{ PK_CUR_BET = Math.min(PK_MAX, PK_CUR_BET + (s.bb||20)); pkUpdateBetUI(); });
+
+  document.querySelectorAll(".quick-bets button").forEach(b=>{
+    b.addEventListener("click", ()=>{
+      const kind = b.dataset.quick;
+      const potNow = s.pot || 0;
+      const cur = s.current_bet || 0;
+      if(kind === "min") PK_CUR_BET = PK_MIN;
+      else if(kind === "half") PK_CUR_BET = Math.max(PK_MIN, Math.min(PK_MAX, Math.floor(potNow * 0.5) + cur));
+      else if(kind === "pot") PK_CUR_BET = Math.max(PK_MIN, Math.min(PK_MAX, potNow + cur));
+      else if(kind === "allin") PK_CUR_BET = PK_MAX;
+      pkUpdateBetUI();
+    });
+  });
+
+  document.querySelectorAll(".main-actions button").forEach(b=>{
+    b.addEventListener("click", ()=>{
+      const act = b.dataset.act;
+      if(act === "fold") pkSend({action:"fold"});
+      else if(act === "check") pkSend({action:"check"});
+      else if(act === "call") pkSend({action:"call"});
+      else if(act === "bet") pkSend({action:"bet", amount:PK_CUR_BET});
+      else if(act === "raise") pkSend({action:"raise", amount:PK_CUR_BET});
+    });
+  });
+
+  document.querySelectorAll(".pre-row").forEach(r=>{
+    r.addEventListener("click", ()=>{
+      const key = r.dataset.pre;
+      const willBeOn = !r.classList.contains("on");
+      if(key === "check_fold"){
+        PK_PRE.check_fold = willBeOn; PK_PRE.call_any = false;
+        pkSend({action: willBeOn ? "pre_check_fold" : "pre_clear"});
+      } else if(key === "call_any"){
+        PK_PRE.call_any = willBeOn; PK_PRE.check_fold = false;
+        pkSend({action: willBeOn ? "pre_call_any" : "pre_clear"});
+      }
+    });
+  });
+
+  const soBtn = document.getElementById("pk-sitout");
+  if(soBtn) soBtn.addEventListener("click", ()=>wsSend({type:"poker_sit_out", table_id: PK_TABLE_ID}));
+  const rbBtn = document.getElementById("pk-rebuy");
+  if(rbBtn) rbBtn.addEventListener("click", ()=>wsSend({type:"poker_rebuy", table_id: PK_TABLE_ID}));
+  const lvBtn = document.getElementById("pk-leave");
+  if(lvBtn) lvBtn.addEventListener("click", ()=>{
+    showConfirm("🚪 Покинуть стол?","Вы выйдете из раздачи. Подтвердить?",()=>{
+      wsSend({type:"poker_leave", table_id: PK_TABLE_ID});
+      PK_VIEW = "lobby"; PK_TABLE_ID = null;
+      wsSend({type:"request_lobby"});
+      els.roomExitBtn.classList.add("hidden");
+    });
+  });
+}
+
+function pkSend(payload){
+  wsSend(Object.assign({type:"poker_action", table_id: PK_TABLE_ID}, payload));
+}
+function pkUpdateBetUI(){
+  const sl = document.getElementById("bet-slider");
+  const val = document.getElementById("bet-val");
+  if(sl) sl.value = PK_CUR_BET;
+  if(val) val.textContent = PK_CUR_BET;
+  const bm = document.getElementById("bet-minus");
+  const bp = document.getElementById("bet-plus");
+  if(bm) bm.disabled = PK_CUR_BET <= PK_MIN;
+  if(bp) bp.disabled = PK_CUR_BET >= PK_MAX;
+  const raiseBtn = document.querySelector('.main-actions .act-bet, .main-actions .act-raise');
+  if(raiseBtn){
+    const isBet = raiseBtn.classList.contains("act-bet");
+    raiseBtn.textContent = isBet ? `BET ${PK_CUR_BET}` : `RAISE ${PK_CUR_BET}`;
+  }
+}
+
+function handleMergeWarning(msg){
+  const until = msg.merge_until_ms || 0;
+  PK_MERGE_UNTIL_MS = until;
+  const withTable = msg.with_table_id || "—";
+  const rem = Math.max(0, Math.ceil((until - Date.now())/1000));
+  if(PK_MERGE_MODAL_SHOWN) return;
+  PK_MERGE_MODAL_SHOWN = true;
+  els.modalTitle.textContent = "⚠️ Слияние столов";
+  els.modalBody.innerHTML = `
+    Ваш стол объединяется со столом <b style="color:#ffcc00;">#${withTable}</b>.<br><br>
+    Через <b id="pk-merge-cd" style="color:#ff8080;font-size:20px;">${rem}</b> секунд все игроки будут пересажены за один стол.
+    <br><br><span style="color:#9a9a9a;font-size:12px;">Раздача завершится, деньги сохранятся.</span>`;
+  els.modalBtns.innerHTML = `<button class="btn" id="pk-merge-ok">Понятно</button>`;
+  document.getElementById("pk-merge-ok").onclick = ()=>hide(els.modal);
+  show(els.modal);
+  const tick = setInterval(()=>{
+    if(!PK_MERGE_UNTIL_MS){ clearInterval(tick); hide(els.modal); return; }
+    const r = Math.max(0, Math.ceil((PK_MERGE_UNTIL_MS - Date.now())/1000));
+    const cd = document.getElementById("pk-merge-cd");
+    if(cd) cd.textContent = r;
+    if(r <= 0){ clearInterval(tick); hide(els.modal); }
+  }, 250);
+  setTimeout(()=>{ if(PK_MERGE_MODAL_SHOWN){ hide(els.modal); PK_MERGE_MODAL_SHOWN = false; } }, 9000);
+  try{ tg?.HapticFeedback?.notificationOccurred?.("warning"); }catch(e){}
+}
+
+/* ================== CONTROLS (общий) ================== */
+els.leaveBtn.addEventListener("click",()=>{
+  if(GAME_TYPE === "poker"){
+    showConfirm("🚪 Покинуть турнир?","Вы выйдете из покерного турнира. Подтвердить?",()=>{
+      wsSend({type:"leave_tournament"});
+    });
+    return;
+  }
+  showConfirm("🚪 Покинуть турнир?","Вы выйдете досрочно. Подтвердить?",()=>{
+    wsSend({type:"leave_tournament"});
+  });
+});
+els.adEnd.addEventListener("click",()=>{
+  showConfirm("🏁 Закончить турнир?","Турнир будет остановлен. Победитель НЕ засчитается.",()=>{
+    wsSend({type:"admin_end_tournament"});
+  });
+});
+function getKickablePlayers(){
+  const s = LAST_STATE;
+  if(!s) return [];
+  let players = [];
+  if(GAME_TYPE === "poker") players = (s.players || []).map(p=>({user_id:p.user_id,name:p.name}));
+  else if(GAME_TYPE === "wheel_1v1") players = (s.players || []).map(p=>({user_id:p.user_id,name:p.name}));
+  else if(GAME_TYPE === "wheel") players = [...(s.active||[]).map(p=>({user_id:p.user_id,name:p.name})),...(s.eliminated||[]).map(p=>({user_id:p.user_id,name:p.name}))];
+  else if(GAME_TYPE === "bracket"){
+    const seen = new Set();
+    for(const rnd of (s.rounds || [])) for(const m of rnd){
+      if(m.p1 && !seen.has(m.p1.user_id)){seen.add(m.p1.user_id); players.push(m.p1);}
+      if(m.p2 && !seen.has(m.p2.user_id)){seen.add(m.p2.user_id); players.push(m.p2);}
+    }
+  }
+  return players.filter(p => p.user_id !== MY_ID);
+}
+els.adKick.addEventListener("click",()=>{
+  const list = getKickablePlayers();
+  if(!list.length){showModal("🚫 Кик игрока","<div style='color:#666;'>Нет доступных.</div>",[]); return;}
+  const rows = list.map(p=>`<div class="kick-row"><span class="kick-name">${escapeHtml(p.name||("Игрок "+p.user_id))}</span><button class="kick-x" data-uid="${p.user_id}" data-name="${escapeHtml(p.name||"Игрок")}">❌</button></div>`).join("");
+  showModal("🚫 Удалить игрока",`<div class="kick-list">${rows}</div>`,[]);
+  document.querySelectorAll("#modal-body .kick-x").forEach(b=>{
+    b.addEventListener("click",()=>{
+      const uid = parseInt(b.dataset.uid,10);
+      const name = b.dataset.name || "Игрок";
+      hide(els.modal);
+      showConfirm("🚫 Удалить игрока?",`Игрок <b style="color:#ffcc00;">${escapeHtml(name)}</b> будет исключён.`,()=>{wsSend({type:"admin_kick_player", user_id:uid});});
+    });
+  });
+});
+function showModal(title, body, buttons){
+  els.modalTitle.textContent = title;
+  els.modalBody.innerHTML = body;
+  if(!buttons || !buttons.length){
+    els.modalBtns.innerHTML = '<button class="btn" id="mc">Закрыть</button>';
+    document.getElementById("mc").onclick = () => hide(els.modal);
+  } else {
+    els.modalBtns.innerHTML = "";
+    buttons.forEach(b=>{
+      const btn = document.createElement("button");
+      btn.className = "btn"; btn.style.background = b.color||"#1e1e1e"; btn.textContent = b.text;
+      btn.onclick = b.onClick; els.modalBtns.appendChild(btn);
+    });
+  }
+  show(els.modal);
+}
+function showConfirm(title, body, onYes){
+  els.modalTitle.textContent = title;
+  els.modalBody.innerHTML = body;
+  els.modalBtns.innerHTML = `
+    <button class="btn" style="background:linear-gradient(135deg,#8b0000,#dc2626);" id="cy">Да</button>
+    <button class="btn" style="background:#1e1e1e;" id="cn">Отмена</button>`;
+  document.getElementById("cy").onclick = () => {hide(els.modal); onYes();};
+  document.getElementById("cn").onclick = () => hide(els.modal);
+  show(els.modal);
+}
+function fireConfetti(){
+  const canvas = els.confetti; show(canvas);
+  canvas.width = window.innerWidth; canvas.height = window.innerHeight;
+  const ctx = canvas.getContext("2d");
+  const colors = ["#ffcc00","#ffa500","#ff8800","#dc143c","#e91e63","#ffb040"];
+  const pieces = Array.from({length:160},()=>({
+    x:Math.random()*canvas.width, y:-20-Math.random()*200,
+    vy:2+Math.random()*3, vx:-1+Math.random()*2,
+    r:4+Math.random()*5, color:colors[Math.floor(Math.random()*colors.length)],
+    rot:Math.random()*Math.PI, vr:-0.1+Math.random()*0.2,
+  }));
+  let f = 0;
+  function loop(){
+    ctx.clearRect(0,0,canvas.width,canvas.height);
+    pieces.forEach(p=>{
+      p.x += p.vx; p.y += p.vy; p.rot += p.vr;
+      ctx.save(); ctx.translate(p.x,p.y); ctx.rotate(p.rot);
+      ctx.fillStyle = p.color; ctx.fillRect(-p.r,-p.r,p.r*2,p.r*0.6); ctx.restore();
+    });
+    f++; if(f<400) requestAnimationFrame(loop); else hide(canvas);
+  }
+  loop();
+}
+</script>
+</body>
+</html>
