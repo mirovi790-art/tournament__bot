@@ -37,7 +37,6 @@ const els = {
   confetti: document.getElementById("confetti"),
 };
 
-/* ---------- общий стейт ---------- */
 let MY_ID = null;
 let IS_ADMIN = false;
 let WS = null;
@@ -50,7 +49,6 @@ let SERVER_OFFSET = 0;
 let PENDING_ENDED = null;
 let ACTIVE_ROOM_TAB = "bracket";
 
-/* ---------- хуки (регистрируются в wheel.js / bracket.js / poker.js) ---------- */
 const _hooks = {
   wheel: () => {},
   wheel1v1: () => {},
@@ -64,7 +62,6 @@ const _hooks = {
 };
 function registerHooks(h) { Object.assign(_hooks, h); }
 
-/* ---------- базовые хелперы ---------- */
 function show(el) { if (el) el.classList.remove("hidden"); }
 function hide(el) { if (el) el.classList.add("hidden"); }
 function setStatus(t, c) { els.status.textContent = t; els.status.className = "status " + (c || ""); }
@@ -83,14 +80,13 @@ function showModal(title, body, buttons) {
   els.modalTitle.textContent = title;
   els.modalBody.innerHTML = body;
   if (!buttons || !buttons.length) {
-    els.modalBtns.innerHTML = '<button class="btn" id="mc">Закрыть</button>';
+    els.modalBtns.innerHTML = `<button class="btn ghost" id="mc">Закрыть</button>`;
     document.getElementById("mc").onclick = () => hide(els.modal);
   } else {
     els.modalBtns.innerHTML = "";
     buttons.forEach(b => {
       const btn = document.createElement("button");
-      btn.className = "btn";
-      btn.style.background = b.color || "#1e1e1e";
+      btn.className = "btn " + (b.variant || (b.color ? "primary" : "ghost"));
       btn.textContent = b.text;
       btn.onclick = b.onClick;
       els.modalBtns.appendChild(btn);
@@ -99,12 +95,16 @@ function showModal(title, body, buttons) {
   show(els.modal);
 }
 
-function showConfirm(title, body, onYes) {
+function showConfirm(title, body, onYes, opts) {
+  opts = opts || {};
+  const yesLabel = opts.yesLabel || "Да";
+  const noLabel = opts.noLabel || "Отмена";
+  const yesVariant = opts.danger === false ? "primary" : "danger";
   els.modalTitle.textContent = title;
   els.modalBody.innerHTML = body;
   els.modalBtns.innerHTML = `
-    <button class="btn" style="background:linear-gradient(135deg,#8b0000,#dc2626);" id="cy">Да</button>
-    <button class="btn" style="background:#1e1e1e;" id="cn">Отмена</button>`;
+    <button class="btn ghost" id="cn">${noLabel}</button>
+    <button class="btn ${yesVariant}" id="cy">${yesLabel}</button>`;
   document.getElementById("cy").onclick = () => { hide(els.modal); onYes(); };
   document.getElementById("cn").onclick = () => hide(els.modal);
   show(els.modal);
@@ -384,7 +384,7 @@ function connectWS(tid) {
 
 /* ---------- Финализация турнира ---------- */
 function handleTournamentEnded(msg) {
-  if ((GAME_TYPE === "wheel" || GAME_TYPE === "wheel_1v1") && WHEEL_LOCK) {
+  if ((GAME_TYPE === "wheel" || GAME_TYPE === "wheel_1v1") && typeof WHEEL_LOCK !== "undefined" && WHEEL_LOCK) {
     PENDING_ENDED = msg;
     return;
   }
@@ -416,7 +416,7 @@ function _showEndedModal(msg) {
   let remaining = countdown;
   els.modalTitle.textContent = title;
   els.modalBody.innerHTML = body + `<div class="countdown-text" id="cd">Возврат в меню через ${remaining}…</div>`;
-  els.modalBtns.innerHTML = `<button class="btn" id="mc">Закрыть сейчас</button>`;
+  els.modalBtns.innerHTML = `<button class="btn ghost" id="mc">Закрыть сейчас</button>`;
   document.getElementById("mc").onclick = () => { clearExitTimer(); exitRoom(); };
   show(els.modal);
   const tick = setInterval(() => {
@@ -429,9 +429,8 @@ function _showEndedModal(msg) {
   EXIT_TIMER = setTimeout(() => { clearInterval(tick); exitRoom(); }, countdown * 1000 + 200);
 }
 
-/* ---------- Кнопки в топбаре ---------- */
+/* ---------- Кнопки топбара ---------- */
 els.roomExitBtn.addEventListener("click", () => {
-  // даём играм шанс обработать по-своему (покер → назад в лобби)
   if (_hooks.roomExit && _hooks.roomExit()) return;
   if (typeof closeBracketRoom === "function") closeBracketRoom();
 });
