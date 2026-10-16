@@ -1,5 +1,5 @@
 /* ======================================================================
-   poker.js — лобби покера и игровой стол (жёсткий один экран)
+   poker.js — лобби покера и игровой стол (делегирование событий)
    ====================================================================== */
 
 let PK_VIEW = "lobby";
@@ -66,7 +66,7 @@ setInterval(() => {
 }, 500);
 
 /* ======================================================================
-   LOBBY
+   ЛОББИ
    ====================================================================== */
 function renderPokerLobby(s) {
   LAST_STATE = s;
@@ -110,7 +110,7 @@ function renderPokerLobby(s) {
   if (PK_LOBBY_TAB === "tables") {
     const tables = s.tables || [];
     if (!tables.length) {
-      body = `<div class="waiting-box" style="padding:40px 20px;"><div class="waiting-ico">🃏</div><div class="waiting-txt">Столы ещё не созданы</div><div style="color:var(--text-muted);font-size:12px;margin-top:4px;">Ожидайте запуска турнира.</div></div>`;
+      body = `<div class="waiting-box" style="padding:40px 20px;"><div class="waiting-ico">🃏</div><div class="waiting-txt">Столы ещё не созданы</div></div>`;
     } else {
       body = `<div style="display:flex;flex-direction:column;gap:10px;">`;
       tables.forEach(t => {
@@ -182,11 +182,8 @@ function renderPokerLobby(s) {
         const chipsShow = isOut ? "выбыл" : `💰 ${p.chips}`;
         let seatTag = "";
         if (!isOut) {
-          if (p.seated === false) {
-            seatTag = `<span class="rk-unseated">не за столом</span>`;
-          } else if (p.table_id) {
-            seatTag = `<span class="rk-place-seated">стол #${p.table_id}</span>`;
-          }
+          if (p.seated === false) seatTag = `<span class="rk-unseated">не за столом</span>`;
+          else if (p.table_id) seatTag = `<span class="rk-place-seated">стол #${p.table_id}</span>`;
         }
         let kickBtn = "";
         if (IS_ADMIN && !isMe && !isOut) {
@@ -207,43 +204,6 @@ function renderPokerLobby(s) {
   }
 
   els.roomContent.innerHTML = `<div class="pk-lobby">${info}${banner}${tabs}${body}</div>`;
-
-  els.roomContent.querySelectorAll(".pk-lobby-tab").forEach(el => {
-    el.addEventListener("click", () => {
-      PK_LOBBY_TAB = el.dataset.pktab;
-      if (PK_LAST_LOBBY) renderPokerLobby(PK_LAST_LOBBY);
-    });
-  });
-  els.roomContent.querySelectorAll("[data-pk-sit]").forEach(el => {
-    el.addEventListener("click", e => {
-      e.stopPropagation();
-      const tid = parseInt(el.dataset.pkSit, 10);
-      if (!tid) return;
-      wsSend({ type: "poker_sit", table_id: tid });
-    });
-  });
-  els.roomContent.querySelectorAll("[data-pk-open]").forEach(el => {
-    el.addEventListener("click", e => {
-      e.stopPropagation();
-      const tid = parseInt(el.dataset.pkOpen, 10);
-      if (!tid) return;
-      openPokerTable(tid);
-    });
-  });
-  els.roomContent.querySelectorAll("[data-pk-kick]").forEach(el => {
-    el.addEventListener("click", e => {
-      e.stopPropagation();
-      const uid = parseInt(el.dataset.pkKick, 10);
-      const nm = el.dataset.pkKickName || "Игрок";
-      if (!uid) return;
-      showConfirm(
-        "🚫 Исключить игрока?",
-        `Игрок <b style="color:#ffcc00;">${escapeHtml(nm)}</b> будет исключён из покер-турнира.`,
-        () => wsSend({ type: "admin_kick_player", user_id: uid }),
-        { yesLabel: "Исключить", noLabel: "Отмена" }
-      );
-    });
-  });
 }
 
 function openPokerTable(tableId) {
@@ -257,7 +217,7 @@ function openPokerTable(tableId) {
 }
 
 /* ======================================================================
-   TABLE
+   СТОЛ
    ====================================================================== */
 function pokerSeatPositions(total) {
   const positions = [];
@@ -316,7 +276,6 @@ function renderPokerState(s) {
   const me = players[meIdx] || {};
   const positions = pokerSeatPositions(players.length);
 
-  /* ============ Места игроков ============ */
   let seatsHtml = "";
   const order = [];
   for (let i = 0; i < players.length; i++) if (i !== meIdx) order.push(i);
@@ -333,7 +292,6 @@ function renderPokerState(s) {
     const lastAction = p.last_action || "";
     const lastActionCls = lastAction.toLowerCase().split(/\s+/)[0];
 
-    /* Свои карты на столе не рисуем — они крупно снизу */
     let cardsHtml = "";
     if (!isMe && !isOut && (p.cards || []).length) {
       cardsHtml = (p.cards || []).map(c => cardMiniHtml(c)).join("");
@@ -368,14 +326,12 @@ function renderPokerState(s) {
       </div>`;
   });
 
-  /* ============ Community ============ */
   const community = s.community || [];
   let commHtml = "";
   for (let i = 0; i < 5; i++) {
     commHtml += community[i] ? cardBigHtml(community[i]) : `<div class="card empty"></div>`;
   }
 
-  /* ============ Side pots ============ */
   const sidePotsHtml = (s.side_pots && s.side_pots.length)
     ? `<div class="poker-sidepots">${s.side_pots.map((sp, i) => `<span class="sp">Side ${i + 1}: ${sp.amount}</span>`).join("")}</div>`
     : "";
@@ -386,7 +342,6 @@ function renderPokerState(s) {
   };
   const phaseLabel = phaseNames[s.phase] || s.phase || "";
 
-  /* ============ Merge warning ============ */
   let mergeBanner = "";
   if (s.merge_warning_until && s.merge_warning_until * 1000 > Date.now()) {
     const rem = Math.max(0, Math.ceil((s.merge_warning_until * 1000 - Date.now()) / 1000));
@@ -397,7 +352,6 @@ function renderPokerState(s) {
       </div>`;
   }
 
-  /* ============ Стол ============ */
   const feltHtml = `
     <div class="poker-table-wrap">
       <div class="poker-felt">
@@ -411,7 +365,6 @@ function renderPokerState(s) {
       </div>
     </div>`;
 
-  /* ============ Мои карты ============ */
   const myCardsHtml = (me.cards || []).map(c => {
     if (!c || c === "?" || c.length < 2) return "";
     const r = c[0] === "T" ? "10" : c[0];
@@ -426,7 +379,6 @@ function renderPokerState(s) {
       ${myHandName ? `<div class="hand-name">${escapeHtml(myHandName)}</div>` : ""}
     </div>`;
 
-  /* ============ Панель управления ============ */
   const isMyTurn = s.turn_idx === meIdx && !me.folded && !me.all_in && !me.sit_out && !me.finish_place;
   const canCheck = !!s.can_check;
   const canCall = !!s.can_call;
@@ -507,7 +459,6 @@ function renderPokerState(s) {
       </div></div>`;
   }
 
-  /* Обёртка .poker-view для жёсткого одного экрана */
   els.roomContent.innerHTML = `
     <div class="poker-view">
       ${mergeBanner}
@@ -515,78 +466,13 @@ function renderPokerState(s) {
       ${myZoneHtml}
       ${controlsHtml}
     </div>`;
-
-  /* ============ События ============ */
-  const sl = document.getElementById("bet-slider");
-  if (sl) sl.addEventListener("input", () => { PK_CUR_BET = parseInt(sl.value, 10) || 0; pkUpdateBetUI(); });
-  const bm = document.getElementById("bet-minus");
-  if (bm) bm.addEventListener("click", () => { PK_CUR_BET = Math.max(PK_MIN, PK_CUR_BET - (s.bb || 20)); pkUpdateBetUI(); });
-  const bp = document.getElementById("bet-plus");
-  if (bp) bp.addEventListener("click", () => { PK_CUR_BET = Math.min(PK_MAX, PK_CUR_BET + (s.bb || 20)); pkUpdateBetUI(); });
-
-  document.querySelectorAll(".quick-bets button").forEach(b => {
-    b.addEventListener("click", () => {
-      const kind = b.dataset.quick;
-      const potNow = s.pot || 0;
-      const cur = s.current_bet || 0;
-      if (kind === "min") PK_CUR_BET = PK_MIN;
-      else if (kind === "half") PK_CUR_BET = Math.max(PK_MIN, Math.min(PK_MAX, Math.floor(potNow * 0.5) + cur));
-      else if (kind === "pot") PK_CUR_BET = Math.max(PK_MIN, Math.min(PK_MAX, potNow + cur));
-      else if (kind === "allin") PK_CUR_BET = PK_MAX;
-      pkUpdateBetUI();
-    });
-  });
-
-  document.querySelectorAll(".main-actions button").forEach(b => {
-    b.addEventListener("click", () => {
-      const act = b.dataset.act;
-      if (act === "fold") pkSend({ action: "fold" });
-      else if (act === "check") pkSend({ action: "check" });
-      else if (act === "call") pkSend({ action: "call" });
-      else if (act === "bet") pkSend({ action: "bet", amount: PK_CUR_BET });
-      else if (act === "raise") pkSend({ action: "raise", amount: PK_CUR_BET });
-    });
-  });
-
-  document.querySelectorAll(".pre-row").forEach(r => {
-    r.addEventListener("click", () => {
-      const key = r.dataset.pre;
-      const willBeOn = !r.classList.contains("on");
-      if (key === "check_fold") {
-        PK_PRE.check_fold = willBeOn;
-        PK_PRE.call_any = false;
-        pkSend({ action: willBeOn ? "pre_check_fold" : "pre_clear" });
-      } else if (key === "call_any") {
-        PK_PRE.call_any = willBeOn;
-        PK_PRE.check_fold = false;
-        pkSend({ action: willBeOn ? "pre_call_any" : "pre_clear" });
-      }
-    });
-  });
-
-  const soBtn = document.getElementById("pk-sitout");
-  if (soBtn) soBtn.addEventListener("click", () => wsSend({ type: "poker_sit_out", table_id: PK_TABLE_ID }));
-  const rbBtn = document.getElementById("pk-rebuy");
-  if (rbBtn) rbBtn.addEventListener("click", () => wsSend({ type: "poker_rebuy", table_id: PK_TABLE_ID }));
-  const lvBtn = document.getElementById("pk-leave");
-  if (lvBtn) lvBtn.addEventListener("click", () => {
-    showConfirm(
-      "🚪 Покинуть стол?",
-      "Вы выйдете из раздачи. Подтвердить?",
-      () => {
-        wsSend({ type: "poker_leave", table_id: PK_TABLE_ID });
-        PK_VIEW = "lobby";
-        PK_TABLE_ID = null;
-        wsSend({ type: "request_lobby" });
-        els.roomExitBtn.classList.add("hidden");
-      },
-      { yesLabel: "Выйти", noLabel: "Остаться" }
-    );
-  });
 }
 
 function pkSend(payload) {
-  wsSend(Object.assign({ type: "poker_action", table_id: PK_TABLE_ID }, payload));
+  const tid = PK_TABLE_ID ?? (LAST_STATE && LAST_STATE.table_id);
+  if (!tid) { console.warn("pkSend: нет table_id", payload); return; }
+  const msg = Object.assign({ type: "poker_action", table_id: tid }, payload);
+  wsSend(msg);
 }
 
 function pkUpdateBetUI() {
@@ -632,6 +518,148 @@ function handleMergeWarning(msg) {
   }, 9000);
   try { tg?.HapticFeedback?.notificationOccurred?.("warning"); } catch (e) {}
 }
+
+/* ======================================================================
+   ДЕЛЕГИРОВАНИЕ СОБЫТИЙ — навешивается ОДИН РАЗ и работает всегда
+   ====================================================================== */
+
+/* Клики */
+document.addEventListener("click", (e) => {
+
+  /* -------- Лобби: табы -------- */
+  const lobbyTab = e.target.closest(".pk-lobby-tab");
+  if (lobbyTab) {
+    PK_LOBBY_TAB = lobbyTab.dataset.pktab;
+    if (PK_LAST_LOBBY) renderPokerLobby(PK_LAST_LOBBY);
+    return;
+  }
+
+  /* -------- Лобби: сесть за стол -------- */
+  const sitBtn = e.target.closest("[data-pk-sit]");
+  if (sitBtn && !sitBtn.disabled) {
+    const tid = parseInt(sitBtn.dataset.pkSit, 10);
+    if (tid) wsSend({ type: "poker_sit", table_id: tid });
+    return;
+  }
+
+  /* -------- Лобби: открыть стол -------- */
+  const openBtn = e.target.closest("[data-pk-open]");
+  if (openBtn && !openBtn.disabled) {
+    const tid = parseInt(openBtn.dataset.pkOpen, 10);
+    if (tid) openPokerTable(tid);
+    return;
+  }
+
+  /* -------- Лобби: кик игрока -------- */
+  const kickBtn = e.target.closest("[data-pk-kick]");
+  if (kickBtn && !kickBtn.disabled) {
+    const uid = parseInt(kickBtn.dataset.pkKick, 10);
+    const nm = kickBtn.dataset.pkKickName || "Игрок";
+    if (!uid) return;
+    showConfirm(
+      "🚫 Исключить игрока?",
+      `Игрок <b style="color:#ffcc00;">${escapeHtml(nm)}</b> будет исключён из покер-турнира.`,
+      () => wsSend({ type: "admin_kick_player", user_id: uid }),
+      { yesLabel: "Исключить", noLabel: "Отмена" }
+    );
+    return;
+  }
+
+  /* -------- Стол: основные кнопки FOLD / CHECK / CALL / BET / RAISE -------- */
+  const mainBtn = e.target.closest(".main-actions button");
+  if (mainBtn && !mainBtn.disabled) {
+    const act = mainBtn.dataset.act;
+    if (!act) return;
+    if (act === "fold") pkSend({ action: "fold" });
+    else if (act === "check") pkSend({ action: "check" });
+    else if (act === "call") pkSend({ action: "call" });
+    else if (act === "bet") pkSend({ action: "bet", amount: PK_CUR_BET });
+    else if (act === "raise") pkSend({ action: "raise", amount: PK_CUR_BET });
+    return;
+  }
+
+  /* -------- Стол: быстрые ставки -------- */
+  const quickBtn = e.target.closest(".quick-bets button");
+  if (quickBtn) {
+    const kind = quickBtn.dataset.quick;
+    const s = LAST_STATE;
+    if (s) {
+      const potNow = s.pot || 0;
+      const cur = s.current_bet || 0;
+      if (kind === "min") PK_CUR_BET = PK_MIN;
+      else if (kind === "half") PK_CUR_BET = Math.max(PK_MIN, Math.min(PK_MAX, Math.floor(potNow * 0.5) + cur));
+      else if (kind === "pot") PK_CUR_BET = Math.max(PK_MIN, Math.min(PK_MAX, potNow + cur));
+      else if (kind === "allin") PK_CUR_BET = PK_MAX;
+      pkUpdateBetUI();
+    }
+    return;
+  }
+
+  /* -------- Стол: pre-actions -------- */
+  const preRow = e.target.closest(".pre-row");
+  if (preRow) {
+    const key = preRow.dataset.pre;
+    const willBeOn = !preRow.classList.contains("on");
+    if (key === "check_fold") {
+      PK_PRE.check_fold = willBeOn;
+      PK_PRE.call_any = false;
+      pkSend({ action: willBeOn ? "pre_check_fold" : "pre_clear" });
+    } else if (key === "call_any") {
+      PK_PRE.call_any = willBeOn;
+      PK_PRE.check_fold = false;
+      pkSend({ action: willBeOn ? "pre_call_any" : "pre_clear" });
+    }
+    preRow.classList.toggle("on", willBeOn);
+    return;
+  }
+
+  /* -------- Стол: +/- ставки -------- */
+  if (e.target.id === "bet-minus") {
+    const s = LAST_STATE;
+    PK_CUR_BET = Math.max(PK_MIN, PK_CUR_BET - ((s && s.bb) || 20));
+    pkUpdateBetUI();
+    return;
+  }
+  if (e.target.id === "bet-plus") {
+    const s = LAST_STATE;
+    PK_CUR_BET = Math.min(PK_MAX, PK_CUR_BET + ((s && s.bb) || 20));
+    pkUpdateBetUI();
+    return;
+  }
+
+  /* -------- Стол: Sit out / Rebuy / Leave -------- */
+  if (e.target.id === "pk-sitout") {
+    wsSend({ type: "poker_sit_out", table_id: PK_TABLE_ID });
+    return;
+  }
+  if (e.target.id === "pk-rebuy") {
+    wsSend({ type: "poker_rebuy", table_id: PK_TABLE_ID });
+    return;
+  }
+  if (e.target.id === "pk-leave") {
+    showConfirm(
+      "🚪 Покинуть стол?",
+      "Вы выйдете из раздачи. Подтвердить?",
+      () => {
+        wsSend({ type: "poker_leave", table_id: PK_TABLE_ID });
+        PK_VIEW = "lobby";
+        PK_TABLE_ID = null;
+        wsSend({ type: "request_lobby" });
+        els.roomExitBtn.classList.add("hidden");
+      },
+      { yesLabel: "Выйти", noLabel: "Остаться" }
+    );
+    return;
+  }
+});
+
+/* Ввод (слайдер) */
+document.addEventListener("input", (e) => {
+  if (e.target.id === "bet-slider") {
+    PK_CUR_BET = parseInt(e.target.value, 10) || 0;
+    pkUpdateBetUI();
+  }
+});
 
 /* ======================================================================
    ХУКИ
