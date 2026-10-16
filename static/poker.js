@@ -1,5 +1,5 @@
 /* ======================================================================
-   poker.js — лобби покера и игровой стол
+   poker.js — лобби покера и игровой стол (жёсткий один экран)
    ====================================================================== */
 
 let PK_VIEW = "lobby";
@@ -281,9 +281,7 @@ function pokerSeatPositions(total) {
 }
 
 function cardMiniHtml(card) {
-  /* Карты соперников: только рубашки — лицо открывается в шоудауне */
   if (!card || card === "?" || card.length < 2) return `<div class="mini"></div>`;
-  /* Если сервер прислал реальную карту (шоудаун), рисуем лицо */
   const r = card[0] === "T" ? "10" : card[0];
   const s = card.slice(1);
   const red = (s === "♥" || s === "♦") ? " red" : "";
@@ -317,9 +315,8 @@ function renderPokerState(s) {
   const meIdx = (s.me_idx !== undefined && s.me_idx >= 0) ? s.me_idx : 0;
   const me = players[meIdx] || {};
   const positions = pokerSeatPositions(players.length);
-  els.rmCounter.textContent = `Стол #${s.table_id || 0} · Раздача #${s.hand_number || 0} · Блайнды ${s.sb || 10}/${s.bb || 20}`;
 
-  /* ============ Построение мест ============ */
+  /* ============ Места игроков ============ */
   let seatsHtml = "";
   const order = [];
   for (let i = 0; i < players.length; i++) if (i !== meIdx) order.push(i);
@@ -336,8 +333,7 @@ function renderPokerState(s) {
     const lastAction = p.last_action || "";
     const lastActionCls = lastAction.toLowerCase().split(/\s+/)[0];
 
-    /* ВАЖНО: карты в мини-виде показываем только у соперников.
-       У себя они уже показаны крупно в myZone. */
+    /* Свои карты на столе не рисуем — они крупно снизу */
     let cardsHtml = "";
     if (!isMe && !isOut && (p.cards || []).length) {
       cardsHtml = (p.cards || []).map(c => cardMiniHtml(c)).join("");
@@ -390,7 +386,7 @@ function renderPokerState(s) {
   };
   const phaseLabel = phaseNames[s.phase] || s.phase || "";
 
-  /* ============ Merge banner ============ */
+  /* ============ Merge warning ============ */
   let mergeBanner = "";
   if (s.merge_warning_until && s.merge_warning_until * 1000 > Date.now()) {
     const rem = Math.max(0, Math.ceil((s.merge_warning_until * 1000 - Date.now()) / 1000));
@@ -415,7 +411,7 @@ function renderPokerState(s) {
       </div>
     </div>`;
 
-  /* ============ Мои карты (крупно) ============ */
+  /* ============ Мои карты ============ */
   const myCardsHtml = (me.cards || []).map(c => {
     if (!c || c === "?" || c.length < 2) return "";
     const r = c[0] === "T" ? "10" : c[0];
@@ -511,7 +507,14 @@ function renderPokerState(s) {
       </div></div>`;
   }
 
-  els.roomContent.innerHTML = mergeBanner + feltHtml + myZoneHtml + controlsHtml;
+  /* Обёртка .poker-view для жёсткого одного экрана */
+  els.roomContent.innerHTML = `
+    <div class="poker-view">
+      ${mergeBanner}
+      ${feltHtml}
+      ${myZoneHtml}
+      ${controlsHtml}
+    </div>`;
 
   /* ============ События ============ */
   const sl = document.getElementById("bet-slider");
