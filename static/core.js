@@ -382,9 +382,10 @@ function connectWS(tid) {
   };
 }
 
-/* ---------- Финализация турнира ---------- */
+/* ---------- Финализация ---------- */
 function handleTournamentEnded(msg) {
-  if ((GAME_TYPE === "wheel" || GAME_TYPE === "wheel_1v1") && typeof WHEEL_LOCK !== "undefined" && WHEEL_LOCK) {
+  if ((GAME_TYPE === "wheel" || GAME_TYPE === "wheel_1v1")
+      && typeof WHEEL_LOCK !== "undefined" && WHEEL_LOCK) {
     PENDING_ENDED = msg;
     return;
   }
@@ -439,18 +440,18 @@ els.leaveBtn.addEventListener("click", () => {
   if (GAME_TYPE === "poker") {
     showConfirm("🚪 Покинуть турнир?", "Вы выйдете из покерного турнира. Подтвердить?", () => {
       wsSend({ type: "leave_tournament" });
-    });
+    }, { yesLabel: "Выйти", noLabel: "Остаться" });
     return;
   }
   showConfirm("🚪 Покинуть турнир?", "Вы выйдете досрочно. Подтвердить?", () => {
     wsSend({ type: "leave_tournament" });
-  });
+  }, { yesLabel: "Выйти", noLabel: "Остаться" });
 });
 
 els.adEnd.addEventListener("click", () => {
   showConfirm("🏁 Закончить турнир?", "Турнир будет остановлен. Победитель НЕ засчитается.", () => {
     wsSend({ type: "admin_end_tournament" });
-  });
+  }, { yesLabel: "Закончить", noLabel: "Отмена" });
 });
 
 /* ---------- Кик игрока (админ) ---------- */
@@ -487,9 +488,10 @@ els.adKick.addEventListener("click", () => {
       const uid = parseInt(b.dataset.uid, 10);
       const name = b.dataset.name || "Игрок";
       hide(els.modal);
-      showConfirm("🚫 Удалить игрока?", `Игрок <b style="color:#ffcc00;">${escapeHtml(name)}</b> будет исключён.`, () => {
-        wsSend({ type: "admin_kick_player", user_id: uid });
-      });
+      showConfirm("🚫 Удалить игрока?",
+        `Игрок <b style="color:#ffcc00;">${escapeHtml(name)}</b> будет исключён.`,
+        () => wsSend({ type: "admin_kick_player", user_id: uid }),
+        { yesLabel: "Исключить", noLabel: "Отмена" });
     });
   });
 });
