@@ -277,11 +277,14 @@ async function openRoom(tid) {
     IS_ADMIN = info.is_admin;
     PENDING_ENDED = null;
     ACTIVE_ROOM_TAB = (info.game_type === "bracket") ? "bracket" : "main";
+
+    /* Покер — жёсткий один экран без прокрутки */
+    els.roomView.classList.toggle("poker-mode", info.game_type === "poker");
+
     hide(els.tabs);
     hide(els.profileView);
     hide(els.tournamentsView);
     show(els.roomView);
-    els.titleText.textContent = info.name;
     els.rmTitleExtra.textContent = info.name;
     els.roomExitBtn.classList.add("hidden");
     show(els.leaveBtn);
@@ -313,6 +316,7 @@ function exitRoom() {
   GAME_TYPE = null;
   LAST_STATE = null;
   ACTIVE_ROOM_TAB = "bracket";
+  els.roomView.classList.remove("poker-mode");
   hide(els.roomView);
   hide(els.leaveBtn);
   hide(els.roomExitBtn);
@@ -320,7 +324,6 @@ function exitRoom() {
   hide(els.roomTabs);
   hide(els.modal);
   hide(els.confetti);
-  els.titleText.textContent = "Турнир";
   show(els.tabs);
   document.querySelectorAll("#tabs .tab").forEach(x => x.classList.remove("active"));
   document.querySelector('#tabs .tab[data-tab="tournaments"]').classList.add("active");
