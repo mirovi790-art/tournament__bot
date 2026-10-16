@@ -39,8 +39,9 @@ from database import (init_db, SessionLocal, User, Admin, Ban, Tournament,
                        Participant)
 from webapp import create_app
 import game as gm
-from game import (WheelGame, Wheel1v1Game, BracketGame,
-                  BRACKET_SERIES_TARGET, BOT_ID_BASE, is_bot)
+from game import BOT_ID_BASE, is_bot
+from wheel import WheelGame, Wheel1v1Game
+from bracket import BracketGame
 from poker import PokerTournament
 
 load_dotenv()
@@ -69,6 +70,7 @@ POKER_TIMES = [10, 15, 20, 30]
 POKER_MAX_SEATS = [2, 3, 4, 5, 6, 7]
 
 
+# ============ МАТЧИНГ ТЕКСТА ============
 def _norm(s: str) -> str:
     if not s: return ""
     out = []
@@ -363,8 +365,7 @@ def series_kb(prefix="tt_series"):
 
 
 def poker_stack_kb():
-    rows = []
-    line = []
+    rows = []; line = []
     for st in POKER_STACKS:
         line.append(InlineKeyboardButton(text=f"💰 {st}", callback_data=f"tt_pk_stack_{st}"))
         if len(line) == 2:
@@ -383,8 +384,7 @@ def poker_blinds_kb():
 
 
 def poker_time_kb():
-    rows = []
-    line = []
+    rows = []; line = []
     for t in POKER_TIMES:
         line.append(InlineKeyboardButton(text=f"⏱ {t} сек", callback_data=f"tt_pk_time_{t}"))
         if len(line) == 2:
@@ -395,8 +395,7 @@ def poker_time_kb():
 
 
 def poker_seats_kb():
-    rows = []
-    line = []
+    rows = []; line = []
     for s in POKER_MAX_SEATS:
         line.append(InlineKeyboardButton(text=f"🪑 {s}", callback_data=f"tt_pk_seats_{s}"))
         if len(line) == 3:
@@ -446,8 +445,7 @@ def manage_tournament_kb(tid, status, game_type=None, access_type="closed"):
     ])
     if status == "registration":
         can_join = (game_type not in ("wheel_1v1", "bracket")) or (game_type == "bracket" and access_type == "open")
-        if game_type == "poker":
-            can_join = True
+        if game_type == "poker": can_join = True
         if can_join:
             rows.append([InlineKeyboardButton(text="🖐 Вступить в турнир", callback_data=f"tt_join_{tid}")])
         if game_type != "bracket":
@@ -2285,7 +2283,6 @@ async def game_ticker(bot):
             for tid, pk in list(gm._active_poker.items()):
                 try:
                     events = pk.check_tick()
-                    # Авто-кик тех, кто не сел за стол за 3 мин
                     timed_out = pk.check_unseated_timeout()
                     if timed_out:
                         async with SessionLocal() as s:
