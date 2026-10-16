@@ -117,7 +117,6 @@ function renderPokerLobby(s) {
         const freeSeats = t.free_seats !== undefined ? t.free_seats : Math.max(0, (s.max_seats || 7) - (t.players_count || 0));
         const isFull = freeSeats <= 0;
         const isMyTable = (s.my_table_id === t.table_id);
-        const canSit = !s.is_seated && !isFull;
         const seatedCount = t.seated_count !== undefined ? t.seated_count : (t.players_count || 0);
         const freeLabel = `${seatedCount} / ${s.max_seats || 7}`;
 
@@ -237,9 +236,12 @@ function renderPokerLobby(s) {
       const uid = parseInt(el.dataset.pkKick, 10);
       const nm = el.dataset.pkKickName || "Игрок";
       if (!uid) return;
-      showConfirm("🚫 Исключить игрока?", `Игрок <b style="color:#ffcc00;">${escapeHtml(nm)}</b> будет исключён из покер-турнира.`, () => {
-        wsSend({ type: "admin_kick_player", user_id: uid });
-      });
+      showConfirm(
+        "🚫 Исключить игрока?",
+        `Игрок <b style="color:#ffcc00;">${escapeHtml(nm)}</b> будет исключён из покер-турнира.`,
+        () => wsSend({ type: "admin_kick_player", user_id: uid }),
+        { yesLabel: "Исключить", noLabel: "Отмена" }
+      );
     });
   });
 }
@@ -279,7 +281,7 @@ function pokerSeatPositions(total) {
 }
 
 function cardMiniHtml(card) {
-  if (!card || card === "?" || card.length < 2) return `<div class="mini">?</div>`;
+  if (!card || card === "?" || card.length < 2) return `<div class="mini"></div>`;
   const r = card[0] === "T" ? "10" : card[0];
   const s = card.slice(1);
   const red = (s === "♥" || s === "♦") ? " red" : "";
@@ -335,8 +337,15 @@ function renderPokerState(s) {
     if (folded) cls += " folded";
     if (sitOut) cls += " sitout";
     if (isOut) cls += " out";
+
+    let betChipHtml = "";
+    if (p.bet > 0) {
+      betChipHtml = `<div class="bet-chip">${p.bet}</div>`;
+    }
+
     seatsHtml += `
       <div class="${cls}" data-idx="${idx}" style="left:${pos[0]}%;top:${pos[1]}%;">
+        ${lastAction ? `<div class="last-action ${lastActionCls}">${escapeHtml(lastAction)}</div>` : ""}
         <div class="poker-avatar-wrap">
           <svg class="poker-timer-svg" viewBox="0 0 100 100">
             <circle class="poker-timer-bg" cx="50" cy="50" r="45"/>
@@ -348,9 +357,8 @@ function renderPokerState(s) {
         <div class="pname">${escapeHtml(p.name)}${idx === meIdx ? " (вы)" : ""}</div>
         <div class="pchips">💰 ${p.chips}</div>
         ${!isOut && cardsHtml ? `<div class="pcards">${cardsHtml}</div>` : ""}
-        ${lastAction ? `<div class="last-action ${lastActionCls}">${escapeHtml(lastAction)}</div>` : ""}
-        ${p.bet > 0 ? `<div class="bet-chip">${p.bet}</div>` : ""}
         ${isOut ? `<div class="pfinish">#${p.finish_place}</div>` : ""}
+        ${betChipHtml}
       </div>`;
   });
 
@@ -385,7 +393,7 @@ function renderPokerState(s) {
       <div class="poker-felt">
         ${seatsHtml}
         <div class="poker-center">
-          <div class="poker-pot">💰 Банк: ${s.pot || 0}</div>
+          <div class="poker-pot">💰 ${s.pot || 0}</div>
           ${sidePotsHtml}
           <div class="poker-community">${commHtml}</div>
           <div class="poker-phase">${phaseLabel}</div>
@@ -394,7 +402,7 @@ function renderPokerState(s) {
     </div>`;
 
   const myCardsHtml = (me.cards || []).map(c => {
-    if (!c || c === "?" || c.length < 2) return `<div class="card" style="background:#222;color:#666;">?</div>`;
+    if (!c || c === "?" || c.length < 2) return "";
     const r = c[0] === "T" ? "10" : c[0];
     const suit = c.slice(1);
     const red = (suit === "♥" || suit === "♦") ? " red" : "";
@@ -540,13 +548,18 @@ function renderPokerState(s) {
   if (rbBtn) rbBtn.addEventListener("click", () => wsSend({ type: "poker_rebuy", table_id: PK_TABLE_ID }));
   const lvBtn = document.getElementById("pk-leave");
   if (lvBtn) lvBtn.addEventListener("click", () => {
-    showConfirm("🚪 Покинуть стол?", "Вы выйдете из раздачи. Подтвердить?", () => {
-      wsSend({ type: "poker_leave", table_id: PK_TABLE_ID });
-      PK_VIEW = "lobby";
-      PK_TABLE_ID = null;
-      wsSend({ type: "request_lobby" });
-      els.roomExitBtn.classList.add("hidden");
-    });
+    showConfirm(
+      "🚪 Покинуть стол?",
+      "Вы выйдете из раздачи. Подтвердить?",
+      () => {
+        wsSend({ type: "poker_leave", table_id: PK_TABLE_ID });
+        PK_VIEW = "lobby";
+        PK_TABLE_ID = null;
+        wsSend({ type: "request_lobby" });
+        els.roomExitBtn.classList.add("hidden");
+      },
+      { yesLabel: "Выйти", noLabel: "Остаться" }
+    );
   });
 }
 
@@ -582,7 +595,7 @@ function handleMergeWarning(msg) {
     Ваш стол объединяется со столом <b style="color:#ffcc00;">#${withTable}</b>.<br><br>
     Через <b id="pk-merge-cd" style="color:#ff8080;font-size:20px;">${rem}</b> секунд все игроки будут пересажены за один стол.
     <br><br><span style="color:#9a9a9a;font-size:12px;">Раздача завершится, деньги сохранятся.</span>`;
-  els.modalBtns.innerHTML = `<button class="btn" id="pk-merge-ok">Понятно</button>`;
+  els.modalBtns.innerHTML = `<button class="btn primary" id="pk-merge-ok">Понятно</button>`;
   document.getElementById("pk-merge-ok").onclick = () => hide(els.modal);
   show(els.modal);
   const tick = setInterval(() => {
@@ -618,15 +631,12 @@ registerHooks({
     PK_UNSEATED_DEADLINE_MS = 0;
   },
   roomExit: () => {
-    // В покере кнопка «Покинуть» в топбаре возвращает в лобби
-    if (GAME_TYPE === "poker") {
-      if (PK_VIEW === "table") {
-        PK_VIEW = "lobby";
-        PK_TABLE_ID = null;
-        wsSend({ type: "request_lobby" });
-        els.roomExitBtn.classList.add("hidden");
-        return true;
-      }
+    if (GAME_TYPE === "poker" && PK_VIEW === "table") {
+      PK_VIEW = "lobby";
+      PK_TABLE_ID = null;
+      wsSend({ type: "request_lobby" });
+      els.roomExitBtn.classList.add("hidden");
+      return true;
     }
     return false;
   },
