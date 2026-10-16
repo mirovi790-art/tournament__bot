@@ -36,7 +36,7 @@ CallbackQuery.answer = _safe_cb_answer
 # =============================
 
 from database import (init_db, SessionLocal, User, Admin, Ban, Tournament,
-                       Participant)
+                       Participant, get_or_create_user)
 from webapp import create_app
 import game as gm
 from game import BOT_ID_BASE, is_bot
@@ -181,12 +181,9 @@ async def _active_tournaments_count(user_id):
 
 
 async def _upsert_user(fu):
+    """Устойчиво к гонке: используем helper из database.py."""
     async with SessionLocal() as s:
-        u = await s.get(User, fu.id)
-        if u is None:
-            u = User(id=fu.id, username=fu.username, first_name=fu.first_name); s.add(u)
-        else:
-            u.username = fu.username; u.first_name = fu.first_name
+        await get_or_create_user(s, fu.id, fu.username, fu.first_name)
         await s.commit()
 
 
@@ -212,7 +209,8 @@ async def _enrich_names(bot, user_ids):
                 if fn: result[uid] = fn
                 elif un: result[uid] = "@" + un
                 else: result[uid] = f"Игрок {uid}"
-                if u is None: s.add(User(id=uid, first_name=fn or None, username=un or None))
+                if u is None:
+                    s.add(User(id=uid, first_name=fn or None, username=un or None))
                 else:
                     if fn: u.first_name = fn
                     if un: u.username = un
@@ -233,7 +231,8 @@ async def _resolve_uid(raw: str):
         except ValueError: return None
         u = await s.get(User, uid)
         if not u:
-            s.add(User(id=uid, first_name=f"Игрок {uid}")); await s.commit()
+            await get_or_create_user(s, uid, None, f"Игрок {uid}")
+            await s.commit()
         return uid
 
 
@@ -606,11 +605,10 @@ async def txt_tournaments(message: Message, state: FSMContext):
 async def txt_profile(message: Message, state: FSMContext):
     await state.clear()
     async with SessionLocal() as s:
-        u = await s.get(User, message.from_user.id)
-        if u is None:
-            u = User(id=message.from_user.id, username=message.from_user.username,
-                     first_name=message.from_user.first_name)
-            s.add(u); await s.commit()
+        u = await get_or_create_user(
+            s, message.from_user.id,
+            message.from_user.username, message.from_user.first_name)
+        await s.commit()
         r = await s.execute(select(Participant).where(
             Participant.user_id == message.from_user.id, Participant.status == "winner"))
         wins = len(r.scalars().all())
@@ -1614,12 +1612,8 @@ async def cb_join_tournament(cb: CallbackQuery):
         else:
             s.add(Participant(tournament_id=tid, user_id=cb.from_user.id,
                               status="approved", chips=t.start_stack))
-        u = await s.get(User, cb.from_user.id)
-        if u is None:
-            s.add(User(id=cb.from_user.id, username=cb.from_user.username,
-                       first_name=cb.from_user.first_name))
-        else:
-            u.username = cb.from_user.username; u.first_name = cb.from_user.first_name
+        await get_or_create_user(
+            s, cb.from_user.id, cb.from_user.username, cb.from_user.first_name)
         await s.commit()
     await cb.answer("✅ Вступили!", show_alert=True)
     async with SessionLocal() as s:
@@ -1984,12 +1978,8 @@ async def cb_apply(cb: CallbackQuery):
     async with SessionLocal() as s:
         t = await s.get(Tournament, tid)
         if not t: await cb.answer("Нет", show_alert=True); return
-        u = await s.get(User, cb.from_user.id)
-        if u is None:
-            s.add(User(id=cb.from_user.id, username=cb.from_user.username,
-                       first_name=cb.from_user.first_name))
-        else:
-            u.username = cb.from_user.username; u.first_name = cb.from_user.first_name
+        await get_or_create_user(
+            s, cb.from_user.id, cb.from_user.username, cb.from_user.first_name)
         r = await s.execute(select(Participant).where(
             Participant.tournament_id == tid, Participant.user_id == cb.from_user.id))
         existing = r.scalar_one_or_none()
@@ -2067,12 +2057,8 @@ async def cb_accept_inv(cb: CallbackQuery):
         if p.status == "approved":
             await cb.answer("Уже принято", show_alert=True); return
         p.status = "approved"
-        u = await s.get(User, cb.from_user.id)
-        if u is None:
-            s.add(User(id=cb.from_user.id, username=cb.from_user.username,
-                       first_name=cb.from_user.first_name))
-        else:
-            u.username = cb.from_user.username; u.first_name = cb.from_user.first_name
+        await get_or_create_user(
+            s, cb.from_user.id, cb.from_user.username, cb.from_user.first_name)
         await s.commit()
         tname = t.name; tprize = t.prize
         series_target = int(getattr(t, "series_target", 1) or 1)
