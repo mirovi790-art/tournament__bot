@@ -26,7 +26,7 @@ function cancelBracketAnim(mid) {
 }
 function ensureWheelCanvasInRoom() { return !!document.getElementById("wheel"); }
 
-/* ---------- watchdog (страховка от зависаний) ---------- */
+/* ---------- watchdog ---------- */
 setInterval(() => {
   if (!ACTIVE_TID || GAME_TYPE !== "bracket") return;
   const mid = BRACKET_ACTIVE_MATCH_ID;
@@ -38,7 +38,12 @@ setInterval(() => {
     cancelBracketAnim(mid);
     clearBracketViewState(mid);
     if (LAST_STATE) renderBracketRoom(LAST_STATE, mid);
-  } else if (state === "showing_result" && elapsed > 6000) {
+  } else if (state === "showing_result" && elapsed > 10000) {
+    // ФИКС: не сбрасываем если матч завершён — иначе таймер возврата к сетке
+    // перезапускается при перерисовке.
+    const s = LAST_STATE;
+    const m = s ? findMatch(s, mid) : null;
+    if (m && m.finished) return;
     clearBracketViewState(mid);
     if (LAST_STATE) renderBracketRoom(LAST_STATE, mid);
   } else if (state === "spinning" && !BRACKET_MATCH_VIEW_ANIM[mid] && elapsed > 2000) {
@@ -47,7 +52,7 @@ setInterval(() => {
   }
 }, 1500);
 
-/* ---------- опрос стейта, когда мы в комнате ---------- */
+/* ---------- опрос стейта ---------- */
 setInterval(() => {
   if (!ACTIVE_TID || GAME_TYPE !== "bracket") return;
   const mid = BRACKET_ACTIVE_MATCH_ID;
@@ -57,9 +62,7 @@ setInterval(() => {
   if (WS && WS.readyState === 1) { try { wsSend({ type: "request_state" }); } catch (e) {} }
 }, 3000);
 
-/* ============================================================
-   RENDER
-   ============================================================ */
+/* ---------- рендер ---------- */
 function renderBracket(s) {
   LAST_STATE = s;
   if (BRACKET_ACTIVE_MATCH_ID) {
@@ -368,6 +371,8 @@ function showMatchResult(match_id) {
     drawBracketUI(s);
     return;
   }
+  // ФИКС: защита от повторного вызова, когда уже показываем результат
+  if (BRACKET_MATCH_VIEW_STATE[match_id] === "showing_result" && m.finished) return;
   setBracketViewState(match_id, "showing_result");
   clearBracketTimer(match_id);
   if (m.finished) {
@@ -549,9 +554,6 @@ function animateBracketSpin(s, m, onDone) {
   BRACKET_MATCH_VIEW_ANIM[mid] = requestAnimationFrame(frame);
 }
 
-/* ============================================================
-   ХУКИ
-   ============================================================ */
 registerHooks({
   bracket: renderBracket,
   cleanup: () => {
