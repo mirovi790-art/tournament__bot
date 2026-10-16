@@ -2,6 +2,7 @@ from datetime import datetime
 from sqlalchemy import BigInteger, String, Integer, DateTime, ForeignKey, Text
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
+from sqlalchemy.exc import IntegrityError
 
 DB_URL = "sqlite+aiosqlite:///tournament.db"
 engine = create_async_engine(DB_URL, echo=False)
@@ -64,6 +65,34 @@ class Participant(Base):
     chips: Mapped[int] = mapped_column(Integer, default=0)
     place: Mapped[int | None] = mapped_column(Integer, nullable=True)
     joined_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+async def get_or_create_user(session, user_id, username=None, first_name=None):
+    """
+    Устойчивое к гонке создание/получение пользователя.
+    Если параллельный запрос уже создал юзера — ловим IntegrityError,
+    откатываемся и перечитываем.
+    """
+    u = await session.get(User, user_id)
+    if u is not None:
+        if first_name is not None:
+            u.first_name = first_name
+        if username is not None:
+            u.username = username
+        return u
+    u = User(id=user_id, username=username, first_name=first_name)
+    session.add(u)
+    try:
+        await session.flush()
+    except IntegrityError:
+        await session.rollback()
+        u = await session.get(User, user_id)
+        if u is not None:
+            if first_name is not None:
+                u.first_name = first_name
+            if username is not None:
+                u.username = username
+    return u
 
 
 async def init_db():
