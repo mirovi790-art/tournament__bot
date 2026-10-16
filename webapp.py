@@ -10,12 +10,14 @@ from urllib.parse import parse_qsl
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
 from fastapi.responses import FileResponse, HTMLResponse
+from fastapi.staticfiles import StaticFiles
 from sqlalchemy import select, func
 
 from database import SessionLocal, User, Tournament, Participant, Ban, Admin
 import game as gm
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+STATIC_DIR = os.path.join(HERE, "static")
 
 _bracket_spin_tasks = {}
 _wheel1v1_spin_tasks = {}
@@ -155,10 +157,12 @@ async def _notify_auto_advanced(bot, tid, player):
         logging.warning("auto-advance notify fail: %s", e)
 
 
+# ============================================================
+# POKER BROADCAST HELPERS
+# ============================================================
 async def _broadcast_poker_all(tid, pk):
     conns = gm._connections.get(tid, set())
     if not conns: return
-    # Карта user_id -> (ws, is_admin)
     admin_ids = set()
     try:
         async with SessionLocal() as s:
@@ -183,8 +187,6 @@ async def _broadcast_poker_all(tid, pk):
         try:
             if t:
                 state = t.to_dict(for_user_id=uid, all_tables_summary=summary)
-                # если игрок за столом, отправляем poker_state,
-                # плюс на всякий случай кладём лобби отдельно? Нет — просто state.
                 await ws.send_json(state)
             else:
                 state = pk.lobby_dict(for_user_id=uid, is_admin=is_admin)
@@ -194,7 +196,6 @@ async def _broadcast_poker_all(tid, pk):
 
 
 async def _broadcast_poker_lobby(tid, pk):
-    """Рассылаем всем актуальный лобби-стейт (для тех, кто в лобби)."""
     conns = gm._connections.get(tid, set())
     if not conns: return
     admin_ids = set()
@@ -212,7 +213,6 @@ async def _broadcast_poker_lobby(tid, pk):
     for ws in list(conns):
         uid = getattr(ws, "_user_id", None)
         if not uid: continue
-        # если игрок за столом — ему стейт стола отправит _broadcast_poker_all
         if pk.find_user_table(uid) is not None: continue
         try:
             await ws.send_json(pk.lobby_dict(for_user_id=uid, is_admin=(uid in admin_ids)))
@@ -243,13 +243,15 @@ async def _broadcast_poker_event(tid, pk, events):
                                 })
                             except Exception: pass
                             break
-        elif kind == "merged":
-            pass
     await _broadcast_poker_all(tid, pk)
     await _broadcast_poker_lobby(tid, pk)
 
 
+# ============================================================
+# BRACKET / WHEEL SERIES
+# ============================================================
 async def _run_bracket_series(bot, tid, match_id):
+    import bracket as bk
     logging.info("[BRACKET-SERIES start] tid=%s match=%s", tid, match_id)
     try:
         await asyncio.sleep(1.5)
@@ -264,7 +266,7 @@ async def _run_bracket_series(bot, tid, match_id):
             spun = g.spin_match(match_id)
             if not spun: return
             await gm.broadcast(tid, g.to_dict())
-            await asyncio.sleep(gm.BRACKET_SPIN_DURATION_MS / 1000.0 + 0.5)
+            await asyncio.sleep(bk.BRACKET_SPIN_DURATION_MS / 1000.0 + 0.5)
             g = gm.get_bracket(tid)
             if not g: return
             m2, advanced_list = g.finalize_spin(match_id)
@@ -276,7 +278,7 @@ async def _run_bracket_series(bot, tid, match_id):
                 for adv in advanced_list or []:
                     asyncio.create_task(_notify_auto_advanced(bot, tid, adv))
                 return
-            await asyncio.sleep(gm.BRACKET_NEXT_DELAY_S)
+            await asyncio.sleep(bk.BRACKET_NEXT_DELAY_S)
     except asyncio.CancelledError:
         raise
     except Exception as e:
@@ -286,6 +288,7 @@ async def _run_bracket_series(bot, tid, match_id):
 
 
 async def _run_wheel1v1_series(bot, tid):
+    import wheel as wh
     try:
         await asyncio.sleep(1.5)
         while True:
@@ -295,7 +298,7 @@ async def _run_wheel1v1_series(bot, tid):
             winner = g.spin()
             if winner is None: return
             await gm.broadcast(tid, g.to_dict())
-            await asyncio.sleep(gm.WHEEL_1V1_SPIN_DURATION_MS / 1000.0 + 0.5)
+            await asyncio.sleep(wh.WHEEL_1V1_SPIN_DURATION_MS / 1000.0 + 0.5)
             g = gm.get_wheel_1v1(tid)
             if not g: return
             result = g.finalize_spin()
@@ -303,7 +306,7 @@ async def _run_wheel1v1_series(bot, tid):
             series_over, _ = result
             await gm.broadcast(tid, g.to_dict())
             if series_over: return
-            await asyncio.sleep(gm.WHEEL_1V1_NEXT_DELAY_S)
+            await asyncio.sleep(wh.WHEEL_1V1_NEXT_DELAY_S)
     except asyncio.CancelledError:
         raise
     except Exception as e:
@@ -314,6 +317,9 @@ async def _run_wheel1v1_series(bot, tid):
 
 def create_app(bot):
     app = FastAPI(title="Tournament Mini App")
+
+    if os.path.isdir(STATIC_DIR):
+        app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
     @app.get("/")
     async def index():
@@ -352,7 +358,8 @@ def create_app(bot):
             is_admin_db = (await s.execute(select(Admin).where(
                 Admin.user_id == user_id))).scalar_one_or_none() is not None
             is_admin = is_admin_db or is_owner
-            seen_tids = set(); my_tours = []
+            seen_tids = set()
+            my_tours = []
             r = await s.execute(select(Participant).where(
                 Participant.user_id == user_id,
                 Participant.status.in_(("approved", "winner", "pending", "kicked", "left"))))
@@ -547,7 +554,6 @@ async def _handle(bot, ws, tid, user_id, msg, t, is_admin):
                                                       all_tables_summary=pk.tables_summary()))
                     except: pass
             return
-        # для прочих сообщений нужен table_id
         tt = pk.find_user_table(user_id)
         table_id = tt.table_id if tt else 0
         if mtype == "poker_action":
@@ -569,8 +575,7 @@ async def _handle(bot, ws, tid, user_id, msg, t, is_admin):
         if mtype == "poker_leave":
             if table_id:
                 pk.leave(table_id, user_id)
-                pk.kick_player(user_id)  # полностью убрать со стола
-            # помечаем в БД как left
+                pk.kick_player(user_id)
             try:
                 async with SessionLocal() as s:
                     r = await s.execute(select(Participant).where(
