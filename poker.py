@@ -1,4 +1,6 @@
-"""No-Limit Texas Hold'em with multi-table + self-seating + lobby for Telegram Mini App."""
+"""No-Limit Texas Hold'em — соответствует классическим правилам.
+Мульти-стол, само-посадка, лобби, авто-слияние, авто-кик.
+"""
 import logging
 import random
 import time
@@ -42,14 +44,17 @@ def pc(card):
 
 
 def _eval5(cards):
+    """Оценка 5 карт. Возвращает кортеж: (rank, *tiebreakers), больше — сильнее."""
     vals = sorted([c[0] for c in cards], reverse=True)
     suits = [c[1] for c in cards]
     is_flush = len(set(suits)) == 1
     uniq = sorted(set(vals), reverse=True)
     is_straight = False; sh = None
     if len(uniq) == 5:
-        if uniq[0] - uniq[4] == 4: is_straight, sh = True, uniq[0]
-        elif uniq == [14, 5, 4, 3, 2]: is_straight, sh = True, 5
+        if uniq[0] - uniq[4] == 4:
+            is_straight, sh = True, uniq[0]
+        elif uniq == [14, 5, 4, 3, 2]:
+            is_straight, sh = True, 5
     cnt = Counter(vals)
     items = sorted(cnt.items(), key=lambda x: (x[1], x[0]), reverse=True)
     counts = [c for _, c in items]; ov = [v for v, _ in items]
@@ -91,8 +96,8 @@ class PokerPlayer:
         self.cards = []
         self.folded = False
         self.all_in = False
-        self.bet = 0
-        self.total_bet = 0
+        self.bet = 0                # вклад в текущем раунде
+        self.total_bet = 0          # вклад за всю раздачу
         self.sit_out = False
         self.last_action = ""
         self.hand_value = None
@@ -133,7 +138,8 @@ class PokerTable:
         self.winner = None
         self.log = []
         self.deck = []
-        self.acted = set()
+        self.acted = set()          # кто уже действовал в раунде
+        self.raise_locked = set()   # кому запрещён рейз (после короткого all-in)
         self.pre_actions = {}
         self.sb_idx = -1
         self.bb_idx = -1
@@ -172,6 +178,7 @@ class PokerTable:
             return j
         return -1
 
+    # ---------- SERIALIZATION ----------
     def to_dict(self, for_user_id=None, all_tables_summary=None):
         me_idx = self.idx_by_uid(for_user_id) if for_user_id else -1
         players_pub = []
@@ -184,6 +191,7 @@ class PokerTable:
             pd["is_bb"] = (i == self.bb_idx)
             pd["is_me"] = (i == me_idx)
             players_pub.append(pd)
+
         me = self.players[me_idx] if me_idx >= 0 else None
         to_call = can_check = can_call = can_bet = can_raise = False
         my_max = my_min_bet = 0
@@ -191,15 +199,18 @@ class PokerTable:
             to_call = max(0, self.current_bet - me.bet)
             can_check = (to_call == 0)
             can_call = (to_call > 0 and me.chips > 0)
-            can_bet = (self.current_bet == 0)
-            can_raise = me.chips > to_call
+            locked = (me_idx in self.raise_locked)
+            can_bet = (self.current_bet == 0) and not locked
+            can_raise = (me.chips > to_call) and not locked
             my_max = me.chips + me.bet
             my_min_bet = max(self.current_bet + self.min_raise, self.bb)
             if my_min_bet > my_max: my_min_bet = my_max
+
         my_hand_name = ""
         if me and me.cards and len(self.community) >= 3:
             v = best_hand(list(me.cards) + list(self.community))
             if v: my_hand_name = hand_name(v)
+
         pre = self.pre_actions.get(me_idx, {}) if me_idx >= 0 else {}
         now_ms = int(time.time() * 1000)
         return {
@@ -228,6 +239,7 @@ class PokerTable:
             "seated_count": len([p for p in self.players if p.finish_place is None]),
         }
 
+    # ---------- HAND LIFECYCLE ----------
     def start_hand(self):
         if self.finished: return
         seated = [p for p in self.players if p.finish_place is None]
@@ -243,6 +255,7 @@ class PokerTable:
         self.turn_idx = -1
         self.turn_deadline = 0
         self.acted = set()
+        self.raise_locked = set()
         self.pre_actions = {}
         self.log = []
         self.winner = None
@@ -256,22 +269,29 @@ class PokerTable:
             p.hand_value = None
             if p.chips <= 0 and p.finish_place is None:
                 p.sit_out = True
+
         active = [i for i, p in enumerate(self.players)
                   if p.finish_place is None and not p.sit_out and p.chips > 0]
         if len(active) < 2:
             self.finished = True
             self._log("Недостаточно игроков за столом")
             return
+
+        # Сдвигаем баттон к следующему активному игроку
         for _ in range(len(self.players)):
             self.dealer_idx = (self.dealer_idx + 1) % len(self.players)
             p = self.players[self.dealer_idx]
             if not p.sit_out and p.chips > 0 and p.finish_place is None:
                 break
+
         deck = make_deck()
         for i in active:
             self.players[i].cards = [deck.pop(), deck.pop()]
         self.deck = deck
+
+        # Определяем SB/BB
         if len(active) == 2:
+            # Хедз-ап: баттон = SB, второй = BB
             sb_idx = self.dealer_idx
             bb_idx = self.alive_idx(sb_idx)
         else:
@@ -279,10 +299,12 @@ class PokerTable:
             bb_idx = self.alive_idx(sb_idx)
         self.sb_idx = sb_idx
         self.bb_idx = bb_idx
+
         self._post_blind(sb_idx, self.sb)
         self._post_blind(bb_idx, self.bb)
         self.current_bet = self.bb
         self.min_raise = self.bb
+
         first = self.alive_idx(bb_idx, skip_allin=True)
         self.phase = "preflop"
         self._log(f"--- Раздача #{self.hand_number} ---")
@@ -310,6 +332,7 @@ class PokerTable:
         self.turn_idx = -1
         self.turn_deadline = 0
 
+    # ---------- ACTIONS ----------
     def act(self, user_id, action, amount=0):
         idx = self.idx_by_uid(user_id)
         if idx < 0: return False
@@ -319,57 +342,95 @@ class PokerTable:
             return self._set_pre(idx, action)
         if p.folded: return False
         self.acted.add(idx)
+
         if action == "fold":
-            p.folded = True; p.last_action = "Fold"; self._log(f"{p.name}: Fold")
+            p.folded = True
+            p.last_action = "Fold"
+            self._log(f"{p.name}: Fold")
+
         elif action == "check":
             if p.bet < self.current_bet: return False
-            p.last_action = "Check"; self._log(f"{p.name}: Check")
+            p.last_action = "Check"
+            self._log(f"{p.name}: Check")
+
         elif action == "call":
             to_call = self.current_bet - p.bet
             if to_call <= 0:
-                p.last_action = "Check"; self._log(f"{p.name}: Check")
+                p.last_action = "Check"
+                self._log(f"{p.name}: Check")
             else:
                 a = min(to_call, p.chips)
-                p.chips -= a; p.bet += a; p.total_bet += a; self.pot += a
+                p.chips -= a
+                p.bet += a
+                p.total_bet += a
+                self.pot += a
                 if p.chips == 0:
-                    p.all_in = True; p.last_action = "All-in"
+                    p.all_in = True
+                    p.last_action = "All-in"
                     self._log(f"{p.name}: All-in {p.bet}")
                 else:
-                    p.last_action = f"Call {a}"; self._log(f"{p.name}: Call {a}")
+                    p.last_action = f"Call {a}"
+                    self._log(f"{p.name}: Call {a}")
+
         elif action in ("bet", "raise"):
+            if idx in self.raise_locked:
+                return False  # короткий all-in закрыл рейз для этого игрока
             try: target = int(amount)
             except: target = self.current_bet + self.min_raise
             min_target = self.current_bet + (self.min_raise if self.current_bet > 0 else self.bb)
             max_target = p.chips + p.bet
             if target > max_target: target = max_target
             if target < min_target:
-                if p.chips + p.bet <= min_target: target = max_target
-                else: return False
+                if p.chips + p.bet <= min_target:
+                    target = max_target  # вынужденный all-in
+                else:
+                    return False
             add = target - p.bet
             if add > p.chips: add = p.chips
-            p.chips -= add; p.bet += add; p.total_bet += add; self.pot += add
+            p.chips -= add
+            p.bet += add
+            p.total_bet += add
+            self.pot += add
             rs = p.bet - self.current_bet
             self.current_bet = p.bet
-            if rs > self.min_raise: self.min_raise = rs
-            self.acted = {idx}
+            # Полноценный рейз: обновляем min_raise, сбрасываем acted и блокировку
+            if rs >= self.min_raise:
+                self.min_raise = rs
+                self.acted = {idx}
+                self.raise_locked = set()
             if p.chips == 0:
-                p.all_in = True; p.last_action = "All-in"
+                p.all_in = True
+                p.last_action = "All-in"
                 self._log(f"{p.name}: All-in {p.bet}")
             else:
                 p.last_action = ("Bet" if action == "bet" else "Raise") + f" {p.bet}"
                 self._log(f"{p.name}: {p.last_action}")
+
         elif action == "allin":
             add = p.chips
-            p.bet += add; p.total_bet += add; self.pot += add
-            p.chips = 0; p.all_in = True
+            p.bet += add
+            p.total_bet += add
+            self.pot += add
+            p.chips = 0
+            p.all_in = True
             if p.bet > self.current_bet:
+                prev_acted = set(self.acted)  # уже включает idx
                 rs = p.bet - self.current_bet
+                is_full = (rs >= self.min_raise)
                 self.current_bet = p.bet
-                if rs > self.min_raise: self.min_raise = rs
-                self.acted = {idx}
-            p.last_action = "All-in"; self._log(f"{p.name}: All-in {p.bet}")
+                if is_full:
+                    self.min_raise = rs
+                    self.acted = {idx}
+                    self.raise_locked = set()
+                else:
+                    # Короткий all-in: блокируем рейз для тех, кто уже действовал
+                    self.raise_locked |= (prev_acted - {idx})
+            p.last_action = "All-in"
+            self._log(f"{p.name}: All-in {p.bet}")
+
         else:
             return False
+
         self._advance()
         return True
 
@@ -377,11 +438,14 @@ class PokerTable:
         p = self.players[idx]
         if p.folded or p.all_in: return False
         if action == "pre_check_fold":
-            self.pre_actions.setdefault(idx, {})["check_fold"] = True; return True
+            self.pre_actions.setdefault(idx, {})["check_fold"] = True
+            return True
         if action == "pre_call_any":
-            self.pre_actions.setdefault(idx, {})["call_any"] = True; return True
+            self.pre_actions.setdefault(idx, {})["call_any"] = True
+            return True
         if action == "pre_clear":
-            self.pre_actions.pop(idx, None); return True
+            self.pre_actions.pop(idx, None)
+            return True
         return False
 
     def _apply_pre_actions(self):
@@ -396,9 +460,12 @@ class PokerTable:
                 else: self.act(p.user_id, "fold")
                 self.pre_actions.pop(idx, None)
             elif pa.get("call_any"):
-                self.act(p.user_id, "call"); self.pre_actions.pop(idx, None)
-        except Exception: pass
+                self.act(p.user_id, "call")
+                self.pre_actions.pop(idx, None)
+        except Exception:
+            pass
 
+    # ---------- ROUND / STREET PROGRESSION ----------
     def _advance(self):
         alive = [p for p in self.players if not p.folded and p.finish_place is None]
         if len(alive) <= 1:
@@ -432,6 +499,8 @@ class PokerTable:
         self.current_bet = 0
         self.min_raise = self.bb
         self.acted = set()
+        self.raise_locked = set()
+
         if self.phase == "preflop":
             self.phase = "flop"
             self.community = [self.deck.pop(), self.deck.pop(), self.deck.pop()]
@@ -446,6 +515,7 @@ class PokerTable:
             self._log("--- Ривер ---")
         elif self.phase == "river":
             self._showdown(); return
+
         can_act = [p for p in self.players if not p.folded and not p.all_in
                    and not p.sit_out and p.finish_place is None]
         if len(can_act) <= 1:
@@ -480,44 +550,50 @@ class PokerTable:
         self._save_history()
         self._schedule_next_hand()
 
+    # ---------- SHOWDOWN & PAYOUT ----------
     def _showdown(self):
         self.phase = "showdown"
         self._end_turn()
-        self._split_pots()
+        pots = self._build_pots()
         in_hand = [p for p in self.players if not p.folded and p.finish_place is None]
         for p in in_hand:
             p.hand_value = best_hand(list(p.cards) + list(self.community))
-        self._award_pot(self.pot, in_hand, "main")
-        for i, sp in enumerate(self.side_pots):
-            elig = [p for p in in_hand if p.user_id in sp["eligible"]]
-            self._award_pot(sp["amount"], elig, f"side{i}")
+
+        # Раздаём банки по уровням
+        for pot in pots:
+            eligible = [p for p in in_hand if p.user_id in pot["eligible"]]
+            self._award_pot(pot["amount"], eligible, pot.get("label", "pot"))
+
         self.pot = 0
         self.side_pots = []
         self._save_history()
         self._schedule_next_hand()
 
-    def _split_pots(self):
+    def _build_pots(self):
+        """Формируем список банков (main + side) по уровням вкладов."""
         contrib = {p.user_id: p.total_bet for p in self.players if p.total_bet > 0}
-        if not contrib: return
+        if not contrib: return []
         levels = sorted(set(contrib.values()))
-        prev = 0; pots = []
+        prev = 0
+        pots = []
         for lvl in levels:
-            amt = 0; elig = []
+            amt = 0
+            elig = []
             for p in self.players:
                 if p.total_bet >= lvl:
                     amt += (lvl - prev)
                     if not p.folded and p.finish_place is None:
                         elig.append(p.user_id)
             if amt > 0 and elig:
-                pots.append({"amount": amt, "eligible": elig})
+                label = "main" if prev == 0 else f"side{len(pots)}"
+                pots.append({"amount": amt, "eligible": elig, "label": label})
             prev = lvl
-        if pots:
-            self.pot = pots[0]["amount"]
-            self.side_pots = pots[1:]
+        return pots
 
     def _award_pot(self, amount, eligible, label):
         if amount <= 0 or not eligible: return
-        best = None; winners = []
+        best = None
+        winners = []
         for p in eligible:
             if p.hand_value is None: continue
             if best is None or p.hand_value > best:
@@ -549,12 +625,15 @@ class PokerTable:
     def _schedule_next_hand(self):
         self._next_hand_at = time.time() + NEXT_HAND_DELAY
 
+    # ---------- TIMER TICK ----------
     def check_tick(self):
         now = time.time()
         if self.turn_idx >= 0 and now >= self.turn_deadline:
             p = self.players[self.turn_idx]
-            if p.bet >= self.current_bet: self.act(p.user_id, "check")
-            else: self.act(p.user_id, "fold")
+            if p.bet >= self.current_bet:
+                self.act(p.user_id, "check")
+            else:
+                self.act(p.user_id, "fold")
             return True
         if self.phase == "showdown" and not self.finished:
             if self._next_hand_at and now >= self._next_hand_at:
@@ -571,6 +650,7 @@ class PokerTable:
                 return True
         return False
 
+    # ---------- PLAYER MGMT ----------
     def sit_out_toggle(self, uid):
         p = self.player_by_uid(uid)
         if not p or p.finish_place is not None: return None
@@ -601,7 +681,8 @@ class PokerTable:
         return True
 
     def add_player(self, pdata):
-        in_progress = (self.hand_number > 0 and self.phase not in ("waiting", "showdown")
+        in_progress = (self.hand_number > 0
+                       and self.phase not in ("waiting", "showdown")
                        and not self.finished)
         pp = PokerPlayer(pdata["user_id"], pdata["name"],
                          pdata.get("chips", self.starting_stack), len(self.players))
@@ -625,7 +706,7 @@ class PokerTable:
 
 
 class PokerTournament:
-    """Несколько столов, игроки сами выбирают стол в лобби."""
+    """Мульти-стол: игроки сами выбирают стол в лобби."""
     def __init__(self, tid, players, prize, sb=10, bb=20, starting_stack=1000,
                  turn_time=20, max_seats=MAX_SEATS_PER_TABLE):
         self.tid = tid
@@ -796,7 +877,8 @@ class PokerTournament:
                 b.merge_warning_until = until; b.merge_with_table_id = a.table_id
                 self._merge_in_progress = True
                 events.append(("merge_warning", (a.table_id, b.table_id)))
-                logger.info("[POKER MERGE warn] tid=%s tables=%s+%s", self.tid, a.table_id, b.table_id)
+                logger.info("[POKER MERGE warn] tid=%s tables=%s+%s",
+                            self.tid, a.table_id, b.table_id)
                 return
 
     def _do_merge(self, triggered_table_id, events):
@@ -814,7 +896,6 @@ class PokerTournament:
         live1 = [p for p in t1.players if p.chips > 0 and p.finish_place is None]
         live2 = [p for p in t2.players if p.chips > 0 and p.finish_place is None]
         if len(live1) + len(live2) > self.max_seats:
-            # Отменяем merge — за время warning столы могли переполниться
             t1.merge_warning_until = 0; t1.merge_with_table_id = None
             t2.merge_warning_until = 0; t2.merge_with_table_id = None
             return
@@ -834,7 +915,8 @@ class PokerTournament:
         if guest in self.tables: self.tables.remove(guest)
         host.phase = "showdown"; host._next_hand_at = time.time() + 2.0
         events.append(("merged", (host.table_id, moved)))
-        logger.info("[POKER MERGE done] tid=%s host=%s moved=%s", self.tid, host.table_id, moved)
+        logger.info("[POKER MERGE done] tid=%s host=%s moved=%s",
+                    self.tid, host.table_id, moved)
 
     def tables_summary(self):
         out = []
