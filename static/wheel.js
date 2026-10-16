@@ -2,7 +2,6 @@
    wheel.js — колесо Фортуны: общее и 1×1
    ====================================================================== */
 
-/* ---------- общий стейт колеса ---------- */
 let WHEEL_ANGLE = 0;
 let WHEEL_LOCK = false;
 let WHEEL_NEXT = null;
@@ -12,14 +11,12 @@ let AUTO_SPIN = false;
 let AUTO_TIMER = null;
 let WCACHE = { key: "", halo: null, sectors: null, hub: null, size: 0 };
 
-/* ---------- стейт 1v1 ---------- */
 let W1V1_VIEW_STATE = "idle";
 let W1V1_LAST_SHOWN = 0;
 let W1V1_TIMER = null;
 let W1V1_ANIM = null;
 let MY_READY = false;
 
-/* ---------- спин-параметры ---------- */
 const SPIN_TURNS_MIN = 9;
 const SPIN_TURNS_MAX = 13;
 const SPIN_EASING = k => 1 - Math.pow(1 - k, 4);
@@ -31,9 +28,7 @@ function stopAutoSpin() {
   if (AUTO_TIMER) { clearTimeout(AUTO_TIMER); AUTO_TIMER = null; }
 }
 
-/* ============================================================
-   КЭШ СЛОЁВ КОЛЕСА
-   ============================================================ */
+/* ---------- кэш слоёв колеса ---------- */
 function _buildWheelHalo(size) {
   const cv = document.createElement("canvas"); cv.width = size; cv.height = size;
   const ctx = cv.getContext("2d");
@@ -79,11 +74,7 @@ function _buildWheelSectors(players, size) {
     const txt = label.length > 18 ? label.slice(0, 18) + "…" : label;
     ctx.fillText(txt, r - 18, 0);
     ctx.restore();
-    ctx.save(); ctx.translate(cx, cy); ctx.rotate(mid);
-    const dotX = r - 22 - ctx.measureText(txt).width - 8;
-    ctx.beginPath(); ctx.arc(dotX, 0, 5, 0, Math.PI*2);
-    ctx.fillStyle = "#4ade80"; ctx.shadowColor = "#22c55e"; ctx.shadowBlur = 8; ctx.fill();
-    ctx.restore();
+    /* Зелёные точки удалены */
   }
   const innerR = r - 4;
   ctx.save(); ctx.beginPath(); ctx.arc(cx, cy, innerR, 0, Math.PI*2);
@@ -188,9 +179,7 @@ function drawBracketWheelStatic(canvas, p1, p2, match_id) {
   _drawBracketWheelFrame(canvas, [p1, p2].filter(Boolean), match_id || "static");
 }
 
-/* ============================================================
-   ОБЩЕЕ КОЛЕСО
-   ============================================================ */
+/* ---------- общее колесо ---------- */
 function renderWheel(s) {
   LAST_STATE = s;
   els.roomExitBtn.classList.add("hidden");
@@ -427,9 +416,7 @@ function startSpinAnimation(s) {
   requestAnimationFrame(frame);
 }
 
-/* ============================================================
-   КОЛЕСО 1×1
-   ============================================================ */
+/* ---------- колесо 1×1 ---------- */
 function renderWheel1v1(s) {
   LAST_STATE = s;
   els.roomExitBtn.classList.add("hidden");
@@ -660,9 +647,7 @@ function startWheel1v1Animation(s, onDone) {
   W1V1_ANIM = requestAnimationFrame(frame);
 }
 
-/* ============================================================
-   ХУКИ
-   ============================================================ */
+/* ---------- хуки ---------- */
 registerHooks({
   wheel: renderWheel,
   wheel1v1: renderWheel1v1,
