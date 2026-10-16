@@ -13,7 +13,8 @@ from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy import select, func
 
-from database import SessionLocal, User, Tournament, Participant, Ban, Admin
+from database import (SessionLocal, User, Tournament, Participant, Ban, Admin,
+                       get_or_create_user)
 import game as gm
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -56,7 +57,8 @@ async def _enrich_names(bot, user_ids):
                 if fn: result[uid] = fn
                 elif un: result[uid] = "@" + un
                 else: result[uid] = f"Игрок {uid}"
-                if u is None: s.add(User(id=uid, first_name=fn or None, username=un or None))
+                if u is None:
+                    await get_or_create_user(s, uid, un or None, fn or None)
                 else:
                     if fn: u.first_name = fn
                     if un: u.username = un
@@ -343,15 +345,13 @@ def create_app(bot):
         async with SessionLocal() as s:
             if await s.get(Ban, user_id):
                 raise HTTPException(status_code=403, detail="Banned")
-            u = await s.get(User, user_id)
-            if not u:
-                u = User(id=user_id, username=u_obj.get("username"),
-                         first_name=u_obj.get("first_name"))
-                s.add(u); await s.commit()
-            else:
-                if u_obj.get("first_name"): u.first_name = u_obj.get("first_name")
-                if u_obj.get("username"): u.username = u_obj.get("username")
-                await s.commit()
+            # Устойчиво к гонке:
+            await get_or_create_user(
+                s, user_id,
+                u_obj.get("username"),
+                u_obj.get("first_name"),
+            )
+            await s.commit()
             wins = (await s.execute(select(func.count()).select_from(Participant)
                 .where(Participant.user_id == user_id,
                        Participant.status == "winner"))).scalar() or 0
@@ -442,18 +442,13 @@ def create_app(bot):
         user_id = parsed.get("user_obj", {}).get("id")
         if not user_id: await websocket.close(code=4001); return
         async with SessionLocal() as s:
-            u = await s.get(User, user_id)
-            if not u:
-                s.add(User(id=user_id,
-                           username=parsed.get("user_obj", {}).get("username"),
-                           first_name=parsed.get("user_obj", {}).get("first_name")))
-                await s.commit()
-            else:
-                new_fn = parsed.get("user_obj", {}).get("first_name")
-                new_un = parsed.get("user_obj", {}).get("username")
-                if new_fn: u.first_name = new_fn
-                if new_un: u.username = new_un
-                await s.commit()
+            # Устойчиво к гонке:
+            await get_or_create_user(
+                s, user_id,
+                parsed.get("user_obj", {}).get("username"),
+                parsed.get("user_obj", {}).get("first_name"),
+            )
+            await s.commit()
             t = await s.get(Tournament, tid)
             if not t: await websocket.close(code=4004); return
             r = await s.execute(select(Participant).where(
