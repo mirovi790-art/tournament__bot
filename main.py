@@ -66,11 +66,11 @@ MAX_ACTIVE_TOURNAMENTS_PER_ADMIN = 5
 
 POKER_STACKS = [500, 1000, 1500, 2000, 3000]
 POKER_BLINDS = [(5, 10), (10, 20), (25, 50), (50, 100)]
-POKER_TIMES = [10, 15, 20, 30]
+# ─── время на ход теперь до 5 минут (было 30 сек) ───
+POKER_TIMES = [10, 15, 20, 30, 45, 60, 90, 120, 180, 300]
 POKER_MAX_SEATS = [2, 3, 4, 5, 6, 7]
 
 
-# ============ МАТЧИНГ ТЕКСТА ============
 def _norm(s: str) -> str:
     if not s: return ""
     out = []
@@ -181,7 +181,6 @@ async def _active_tournaments_count(user_id):
 
 
 async def _upsert_user(fu):
-    """Устойчиво к гонке: используем helper из database.py."""
     async with SessionLocal() as s:
         await get_or_create_user(s, fu.id, fu.username, fu.first_name)
         await s.commit()
@@ -210,7 +209,7 @@ async def _enrich_names(bot, user_ids):
                 elif un: result[uid] = "@" + un
                 else: result[uid] = f"Игрок {uid}"
                 if u is None:
-                    s.add(User(id=uid, first_name=fn or None, username=un or None))
+                    await get_or_create_user(s, uid, un or None, fn or None)
                 else:
                     if fn: u.first_name = fn
                     if un: u.username = un
@@ -382,11 +381,17 @@ def poker_blinds_kb():
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
+def _fmt_time(sec):
+    if sec < 60: return f"{sec} сек"
+    if sec % 60 == 0: return f"{sec // 60} мин"
+    return f"{sec // 60}:{sec % 60:02d}"
+
+
 def poker_time_kb():
     rows = []; line = []
     for t in POKER_TIMES:
-        line.append(InlineKeyboardButton(text=f"⏱ {t} сек", callback_data=f"tt_pk_time_{t}"))
-        if len(line) == 2:
+        line.append(InlineKeyboardButton(text=f"⏱ {_fmt_time(t)}", callback_data=f"tt_pk_time_{t}"))
+        if len(line) == 3:
             rows.append(line); line = []
     if line: rows.append(line)
     rows.append([InlineKeyboardButton(text="❌ Отмена", callback_data="admin_cancel_fsm")])
@@ -515,7 +520,7 @@ def _help_text():
             "▫️ Серия побед настраивается (1/2/3).\n\n"
             "<b>🃏 Покер (NLHE):</b>\n"
             "▫️ 2–49 игроков, столы до 7 мест.\n"
-            "▫️ Настраиваются: стек, блайнды, время хода, размер стола.\n"
+            "▫️ Настраиваются: стек, блайнды, время хода (до 5 мин), размер стола.\n"
             "▫️ Игрок сам выбирает стол в лобби (3 мин на выбор).\n"
             "▫️ Автослияние столов, лобби с рейтингом.\n\n"
             "<b>🤖 Боты:</b> в меню турнира есть «Добавить бота».\n\n"
@@ -605,7 +610,7 @@ async def txt_tournaments(message: Message, state: FSMContext):
 async def txt_profile(message: Message, state: FSMContext):
     await state.clear()
     async with SessionLocal() as s:
-        u = await get_or_create_user(
+        await get_or_create_user(
             s, message.from_user.id,
             message.from_user.username, message.from_user.first_name)
         await s.commit()
@@ -1136,7 +1141,7 @@ async def tt_pk_time(cb: CallbackQuery, state: FSMContext):
     await state.update_data(pk_time=t)
     await state.set_state(TournamentFSM.pk_seats)
     await _safe_edit(cb, f"<b>🃏 Покер · Шаг 8/8</b>\n{SEP}\n"
-                         f"Время на ход: <b>{t} сек</b>\n\n"
+                         f"Время на ход: <b>{_fmt_time(t)}</b>\n\n"
                          "Выбери <b>макс. мест за столом</b>:",
                      reply_markup=poker_seats_kb())
     await cb.answer()
@@ -1305,7 +1310,7 @@ async def _build_confirm_text(state: FSMContext) -> str:
             "🔹 Формат: <b>No-Limit Texas Hold'em</b>",
             f"🔹 Стартовый стек: <b>{data.get('pk_stack', 1000)}</b>",
             f"🔹 Блайнды: <b>{data.get('pk_sb', 10)} / {data.get('pk_bb', 20)}</b>",
-            f"🔹 Время на ход: <b>{data.get('pk_time', 20)} сек</b>",
+            f"🔹 Время на ход: <b>{_fmt_time(data.get('pk_time', 20))}</b>",
             f"🔹 Макс. мест за столом: <b>{data.get('pk_seats', 7)}</b>",
             f"🔹 Игроков всего: <b>2 – 49</b> (несколько столов + автослияние)",
             "\n<blockquote>Игроки сами выбирают стол в лобби (3 мин на выбор).</blockquote>",
@@ -1467,7 +1472,7 @@ async def _show_tournament_menu(cb: CallbackQuery, tid: int):
         text += f"\n<b>Формат боя:</b> до <code>{getattr(t, 'series_target', 1)}</code> побед"
     if t.game_type == "poker":
         text += (f"\n<b>Стек:</b> <code>{t.start_stack}</code>"
-                 f" · <b>Время:</b> <code>{t.turn_time}с</code>"
+                 f" · <b>Время:</b> <code>{_fmt_time(t.turn_time)}</code>"
                  f" · <b>Мест за столом:</b> <code>{t.series_target}</code>"
                  f" · <b>Блайнды:</b> <code>{t.blind_interval}/{t.blind_interval*2}</code>")
     if bot_count > 0:
