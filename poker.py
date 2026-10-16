@@ -601,7 +601,6 @@ class PokerTable:
         return True
 
     def add_player(self, pdata):
-        """Добавить игрока к столу (он подсаживается в следующую раздачу)."""
         in_progress = (self.hand_number > 0 and self.phase not in ("waiting", "showdown")
                        and not self.finished)
         pp = PokerPlayer(pdata["user_id"], pdata["name"],
@@ -643,7 +642,6 @@ class PokerTournament:
         self._last_merge_check = 0
         self._merge_in_progress = False
         self._next_place = len(players)
-        # НЕ рассаживаем сразу — кладём в unseated
         self.unseated = {}
         self.started_at = time.time()
         self.unseated_deadline = self.started_at + UNSEATED_TIMEOUT
@@ -653,7 +651,6 @@ class PokerTournament:
                 "name": p["name"],
                 "chips": starting_stack,
             }
-        # Предсоздаём столы, чтобы их было видно в лобби
         n_tables = max(1, (len(players) + self.max_seats - 1) // self.max_seats)
         for _ in range(n_tables):
             self._create_table()
@@ -679,9 +676,7 @@ class PokerTournament:
     def is_seated(self, uid):
         return self.find_user_table(uid) is not None
 
-    # ---------- посадка ----------
     def sit(self, table_id, uid):
-        """Игрок садится за стол. table_id=0/None → автоподбор."""
         if self.is_seated(uid):
             return False, "Уже за столом"
         if uid not in self.unseated:
@@ -707,7 +702,6 @@ class PokerTournament:
                 t = self._create_table()
         t.add_player(data)
         del self.unseated[uid]
-        # если ≥2 и раздача ещё не началась — стартуем
         seated = [p for p in t.players if p.finish_place is None and p.chips > 0]
         if len(seated) >= 2 and t.hand_number == 0 and not t.finished:
             try: t.start_hand()
@@ -720,19 +714,16 @@ class PokerTournament:
             self.sit(0, uid)
 
     def check_unseated_timeout(self):
-        """Список uid, которых надо кикнуть (не сели за стол за 3 мин)."""
         if time.time() < self.unseated_deadline: return []
-        return list(self.unseated.keys())
+        return [uid for uid in list(self.unseated.keys()) if not is_bot(uid)]
 
     def kick_unseated(self, uid):
-        """Убрать из unseated (после авто-кика или ручного)."""
         if uid in self.unseated:
             del self.unseated[uid]
             return True
         return False
 
     def kick_player(self, uid):
-        """Полное удаление по admin-действию (из unseated ИЛИ со стола)."""
         if uid in self.unseated:
             del self.unseated[uid]
             return True
@@ -742,7 +733,6 @@ class PokerTournament:
                 return True
         return False
 
-    # ---------- tick ----------
     def check_tick(self):
         events = []
         now = time.time()
@@ -810,13 +800,24 @@ class PokerTournament:
                 return
 
     def _do_merge(self, triggered_table_id, events):
+        self._merge_in_progress = False
         t1 = self.get_table(triggered_table_id)
-        if not t1 or not t1.merge_with_table_id: return
+        if not t1 or not t1.merge_with_table_id:
+            if t1:
+                t1.merge_warning_until = 0
+                t1.merge_with_table_id = None
+            return
         t2 = self.get_table(t1.merge_with_table_id)
         if not t2:
-            t1.merge_warning_until = 0; t1.merge_with_table_id = None; return
+            t1.merge_warning_until = 0; t1.merge_with_table_id = None
+            return
         live1 = [p for p in t1.players if p.chips > 0 and p.finish_place is None]
         live2 = [p for p in t2.players if p.chips > 0 and p.finish_place is None]
+        if len(live1) + len(live2) > self.max_seats:
+            # Отменяем merge — за время warning столы могли переполниться
+            t1.merge_warning_until = 0; t1.merge_with_table_id = None
+            t2.merge_warning_until = 0; t2.merge_with_table_id = None
+            return
         host, guest = (t1, t2)
         if len(live2) > len(live1) or (len(live2) == len(live1) and t2.table_id < t1.table_id):
             host, guest = t2, t1
@@ -832,17 +833,16 @@ class PokerTournament:
         host.merge_warning_until = 0; host.merge_with_table_id = None
         if guest in self.tables: self.tables.remove(guest)
         host.phase = "showdown"; host._next_hand_at = time.time() + 2.0
-        self._merge_in_progress = False
         events.append(("merged", (host.table_id, moved)))
         logger.info("[POKER MERGE done] tid=%s host=%s moved=%s", self.tid, host.table_id, moved)
 
-    # ---------- summaries ----------
     def tables_summary(self):
         out = []
         for t in self.tables:
             active = [p for p in t.players if p.finish_place is None]
             alive = [p for p in active if p.chips > 0 and not p.sit_out]
             avg = sum(p.chips for p in alive) // len(alive) if alive else 0
+            player_chips = [{"name": p.name, "chips": p.chips} for p in active]
             out.append({
                 "table_id": t.table_id,
                 "players_count": len(active),
@@ -857,6 +857,7 @@ class PokerTournament:
                 "merge_with_table_id": t.merge_with_table_id,
                 "finished": t.finished,
                 "started": t.hand_number > 0,
+                "player_chips": player_chips,
             })
         return out
 
